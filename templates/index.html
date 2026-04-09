@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesure de Marche Horlogère</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --border: #2a2d3a;
+            --text: #e0e0e6;
+            --text2: #9095a5;
+            --accent: #4f8cff;
+            --accent2: #38d9a9;
+            --red: #ff6b6b;
+            --orange: #ffa94d;
+            --green: #51cf66;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        header h1 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+        header h1 span { color: var(--text2); font-weight: 400; }
+        .badge {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .badge-idle { background: var(--border); color: var(--text2); }
+        .badge-running { background: #1a3a2a; color: var(--green); animation: pulse 1.5s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        main { padding: 1.5rem 2rem; max-width: 1400px; margin: 0 auto; }
+
+        /* Cards */
+        .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+        }
+        .card-label { font-size: 0.7rem; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; }
+        .card-value { font-size: 1.6rem; font-weight: 700; margin-top: 0.3rem; }
+        .card-unit { font-size: 0.8rem; color: var(--text2); font-weight: 400; }
+
+        /* Sections */
+        .section { margin-bottom: 2rem; }
+        .section-title {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text2);
+            margin-bottom: 0.8rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.4rem;
+        }
+
+        /* Chart */
+        .chart-wrap {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            height: 320px;
+            position: relative;
+        }
+
+        /* Table */
+        .table-wrap {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+        th {
+            background: var(--bg);
+            padding: 0.6rem 0.8rem;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text2);
+            text-transform: uppercase;
+            font-size: 0.68rem;
+            letter-spacing: 0.05em;
+            white-space: nowrap;
+            position: sticky;
+            top: 0;
+        }
+        td {
+            padding: 0.5rem 0.8rem;
+            border-top: 1px solid var(--border);
+            white-space: nowrap;
+        }
+        tr:hover td { background: rgba(79, 140, 255, 0.05); }
+        .positive { color: var(--green); }
+        .negative { color: var(--red); }
+        .confidence-bar {
+            display: inline-block;
+            width: 50px;
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+            vertical-align: middle;
+            margin-right: 0.4rem;
+        }
+        .confidence-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+        .btn-delete {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text2);
+            cursor: pointer;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+        }
+        .btn-delete:hover { border-color: var(--red); color: var(--red); }
+
+        /* Form panel */
+        .panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+        @media (max-width: 900px) { .panel-grid { grid-template-columns: 1fr; } }
+        .form-panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.2rem;
+        }
+        .form-group { margin-bottom: 0.8rem; }
+        .form-group label {
+            display: block;
+            font-size: 0.72rem;
+            color: var(--text2);
+            margin-bottom: 0.3rem;
+            text-transform: uppercase;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 0.5rem 0.7rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 0.82rem;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        .form-check { display: flex; align-items: center; gap: 0.5rem; }
+        .form-check input[type=checkbox] { accent-color: var(--accent); }
+        .btn {
+            display: inline-block;
+            padding: 0.6rem 1.5rem;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.82rem;
+            font-weight: 600;
+            transition: opacity 0.2s;
+        }
+        .btn:hover { opacity: 0.85; }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-danger { background: var(--red); color: #fff; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-row { display: flex; gap: 0.8rem; margin-top: 1rem; }
+
+        /* Log */
+        .log-panel {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.8rem;
+            max-height: 350px;
+            overflow-y: auto;
+            font-size: 0.72rem;
+            line-height: 1.6;
+            color: var(--accent2);
+        }
+        .log-panel:empty::before {
+            content: "En attente d'une mesure...";
+            color: var(--text2);
+        }
+        .log-line { white-space: pre-wrap; word-break: break-all; }
+        .no-data { color: var(--text2); text-align: center; padding: 3rem; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>⏱ Mesure de Marche <span>— v2026</span></h1>
+    <span id="statusBadge" class="badge badge-idle">IDLE</span>
+</header>
+
+<main>
+    <!-- KPI cards -->
+    <div class="cards" id="kpiCards">
+        <div class="card">
+            <div class="card-label">Dernière marche</div>
+            <div class="card-value" id="kpiMarche">—</div>
+        </div>
+        <div class="card">
+            <div class="card-label">f réelle</div>
+            <div class="card-value" id="kpiFreelle">—</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Confiance</div>
+            <div class="card-value" id="kpiConfidence">—</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Nb mesures</div>
+            <div class="card-value" id="kpiCount">{{ results|length }}</div>
+        </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="section">
+        <div class="section-title">Évolution de la marche</div>
+        <div class="chart-wrap">
+            <canvas id="marcheChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Controls + Log -->
+    <div class="section">
+        <div class="section-title">Nouvelle mesure</div>
+        <div class="panel-grid">
+            <div class="form-panel">
+                <div class="form-group">
+                    <label>Port série</label>
+                    <input type="text" id="inputPort" value="test" placeholder="/dev/ttyUSB0 ou test">
+                </div>
+                <div class="form-group">
+                    <label>Calibre (A/h)</label>
+                    <select id="inputCalibre">
+                        {% for key, val in calibres.items() %}
+                        <option value="{{ key }}" {% if key == '28800' %}selected{% endif %}>
+                            {{ key }} A/h — {{ val }} Hz
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Durée de mesure (s)</label>
+                    <input type="number" id="inputDuration" value="10" min="1" max="300" step="1">
+                </div>
+                <div class="form-group">
+                    <label>T_trig_off (µs)</label>
+                    <input type="number" id="inputTrigOff" value="250000" min="1000" max="1000000" step="100">
+                </div>
+                <div class="form-group form-check">
+                    <input type="checkbox" id="inputSkipSync">
+                    <label style="margin:0">Passer la synchronisation</label>
+                </div>
+                <div class="btn-row">
+                    <button class="btn btn-primary" id="btnStart" onclick="startMeasure()">▶ Lancer</button>
+                    <button class="btn btn-danger" id="btnStop" onclick="stopMeasure()" disabled>■ Arrêter</button>
+                </div>
+            </div>
+            <div class="form-panel">
+                <label style="font-size:0.72rem;color:var(--text2);text-transform:uppercase;">Journal</label>
+                <div class="log-panel" id="logPanel"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results table -->
+    <div class="section">
+        <div class="section-title">Historique des mesures</div>
+        <div class="table-wrap">
+            {% if results %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Date</th>
+                        <th>f flash (Hz)</th>
+                        <th>f app (Hz)</th>
+                        <th>f réelle (Hz)</th>
+                        <th>Écart (Hz)</th>
+                        <th>Marche (s/j)</th>
+                        <th>Classe</th>
+                        <th>Images</th>
+                        <th>Confiance</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="resultsBody">
+                    {% for r in results %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ r.timestamp[:19] }}</td>
+                        <td>{{ "%.4f"|format(r.f_flash) }}</td>
+                        <td>{{ "%.4f"|format(r.f_app) }}</td>
+                        <td>{{ "%.6f"|format(r.f_reelle) }}</td>
+                        <td class="{{ 'positive' if r.ecart_hz > 0 else 'negative' }}">
+                            {{ "%+.6f"|format(r.ecart_hz) }}
+                        </td>
+                        <td class="{{ 'positive' if r.marche_s_j > 0 else 'negative' }}" style="font-weight:700;">
+                            {{ "%+.2f"|format(r.marche_s_j) }}
+                        </td>
+                        <td>{{ r.classe_dom }}</td>
+                        <td>{{ r.nb_images }}</td>
+                        <td>
+                            <span class="confidence-bar">
+                                <span class="confidence-fill" style="width:{{ (r.confidence * 100)|int }}%;background:{% if r.confidence > 0.6 %}var(--green){% elif r.confidence > 0.3 %}var(--orange){% else %}var(--red){% endif %};"></span>
+                            </span>
+                            {{ "%.0f"|format(r.confidence * 100) }}%
+                        </td>
+                        <td>
+                            <button class="btn-delete" onclick="deleteRow({{ loop.index0 }})" title="Supprimer">✕</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="no-data">Aucune mesure enregistrée.</div>
+            {% endif %}
+        </div>
+    </div>
+</main>
+
+<script>
+    // ── Data from server ─────────────────────────────────────
+    const results = {{ results | tojson }};
+
+    // ── KPI ──────────────────────────────────────────────────
+    function updateKPIs() {
+        const last = results.length ? results[results.length - 1] : null;
+        document.getElementById('kpiCount').textContent = results.length;
+        if (last) {
+            const m = last.marche_s_j;
+            document.getElementById('kpiMarche').innerHTML =
+                `<span class="${m > 0 ? 'positive' : 'negative'}">${m > 0 ? '+' : ''}${m.toFixed(2)}</span> <span class="card-unit">s/j</span>`;
+            document.getElementById('kpiFreelle').innerHTML =
+                `${last.f_reelle.toFixed(4)} <span class="card-unit">Hz</span>`;
+            document.getElementById('kpiConfidence').innerHTML =
+                `${(last.confidence * 100).toFixed(0)}<span class="card-unit">%</span>`;
+        }
+    }
+    updateKPIs();
+
+    // ── Chart ────────────────────────────────────────────────
+    const ctx = document.getElementById('marcheChart').getContext('2d');
+    const labels = results.map(r => r.timestamp.substring(5, 16).replace('T', ' '));
+    const marcheData = results.map(r => r.marche_s_j);
+    const confData = results.map(r => r.confidence * 100);
+
+    const chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Marche (s/j)',
+                    data: marcheData,
+                    borderColor: '#4f8cff',
+                    backgroundColor: 'rgba(79,140,255,0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    yAxisID: 'y',
+                },
+                {
+                    label: 'Confiance (%)',
+                    data: confData,
+                    borderColor: '#38d9a9',
+                    backgroundColor: 'rgba(56,217,169,0.08)',
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 3,
+                    borderDash: [5, 3],
+                    yAxisID: 'y1',
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { labels: { color: '#9095a5', font: { family: 'inherit', size: 11 } } },
+                tooltip: {
+                    backgroundColor: '#1a1d27',
+                    borderColor: '#2a2d3a',
+                    borderWidth: 1,
+                    titleColor: '#e0e0e6',
+                    bodyColor: '#e0e0e6',
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: '#9095a5', font: { size: 10 }, maxRotation: 45 },
+                    grid: { color: 'rgba(42,45,58,0.5)' }
+                },
+                y: {
+                    title: { display: true, text: 's/jour', color: '#4f8cff' },
+                    ticks: { color: '#9095a5' },
+                    grid: { color: 'rgba(42,45,58,0.5)' },
+                },
+                y1: {
+                    position: 'right',
+                    title: { display: true, text: 'Confiance %', color: '#38d9a9' },
+                    ticks: { color: '#9095a5' },
+                    grid: { drawOnChartArea: false },
+                    min: 0, max: 100,
+                },
+            }
+        }
+    });
+
+    // ── Measure control ──────────────────────────────────────
+    let pollTimer = null;
+
+    function startMeasure() {
+        const body = {
+            port: document.getElementById('inputPort').value,
+            calibre: document.getElementById('inputCalibre').value,
+            duration: parseFloat(document.getElementById('inputDuration').value),
+            trig_off: parseInt(document.getElementById('inputTrigOff').value),
+            skip_sync: document.getElementById('inputSkipSync').checked,
+        };
+        // Effacer le journal au lancement d'une nouvelle mesure
+        document.getElementById('logPanel').innerHTML = '';
+
+        fetch('/api/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) { alert(data.error); return; }
+            setRunning(true);
+            pollStatus();
+            pollTimer = setInterval(pollStatus, 1000);
+        })
+        .catch(err => alert('Erreur: ' + err));
+    }
+
+    function stopMeasure() {
+        fetch('/api/stop', { method: 'POST' })
+            .then(r => r.json())
+            .then(() => setRunning(false));
+    }
+
+    function setRunning(on) {
+        document.getElementById('btnStart').disabled = on;
+        document.getElementById('btnStop').disabled = !on;
+        const badge = document.getElementById('statusBadge');
+        badge.textContent = on ? 'MESURE EN COURS' : 'IDLE';
+        badge.className = 'badge ' + (on ? 'badge-running' : 'badge-idle');
+    }
+
+    function pollStatus() {
+        fetch('/api/status')
+            .then(r => r.json())
+            .then(data => {
+                const panel = document.getElementById('logPanel');
+                panel.innerHTML = data.log.map(l => `<div class="log-line">${escapeHtml(l)}</div>`).join('');
+                panel.scrollTop = panel.scrollHeight;
+
+                if (!data.running && pollTimer) {
+                    clearInterval(pollTimer);
+                    pollTimer = null;
+                    setRunning(false);
+                    // Rafraîchir les résultats sans recharger la page (préserve les logs)
+                    refreshResults();
+                }
+            });
+    }
+
+    function deleteRow(idx) {
+        if (!confirm('Supprimer cette mesure ?')) return;
+        fetch(`/api/delete/${idx}`, { method: 'DELETE' })
+            .then(r => r.json())
+            .then(() => location.reload());
+    }
+
+    function escapeHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function refreshResults() {
+        fetch('/api/results')
+            .then(r => r.json())
+            .then(newResults => {
+                // Mettre à jour les KPIs
+                const last = newResults.length ? newResults[newResults.length - 1] : null;
+                document.getElementById('kpiCount').textContent = newResults.length;
+                if (last) {
+                    const m = last.marche_s_j;
+                    document.getElementById('kpiMarche').innerHTML =
+                        `<span class="${m > 0 ? 'positive' : 'negative'}">${m > 0 ? '+' : ''}${m.toFixed(2)}</span> <span class="card-unit">s/j</span>`;
+                    document.getElementById('kpiFreelle').innerHTML =
+                        `${last.f_reelle.toFixed(4)} <span class="card-unit">Hz</span>`;
+                    document.getElementById('kpiConfidence').innerHTML =
+                        `${(last.confidence * 100).toFixed(0)}<span class="card-unit">%</span>`;
+                }
+
+                // Mettre à jour le graphique
+                chart.data.labels = newResults.map(r => r.timestamp.substring(5, 16).replace('T', ' '));
+                chart.data.datasets[0].data = newResults.map(r => r.marche_s_j);
+                chart.data.datasets[1].data = newResults.map(r => r.confidence * 100);
+                chart.update();
+
+                // Mettre à jour le tableau
+                const tbody = document.getElementById('resultsBody');
+                if (tbody) {
+                    tbody.innerHTML = newResults.map((r, i) => {
+                        const ecartClass = r.ecart_hz > 0 ? 'positive' : 'negative';
+                        const marcheClass = r.marche_s_j > 0 ? 'positive' : 'negative';
+                        const conf = r.confidence * 100;
+                        const confColor = conf > 60 ? 'var(--green)' : conf > 30 ? 'var(--orange)' : 'var(--red)';
+                        return `<tr>
+                            <td>${i + 1}</td>
+                            <td>${escapeHtml(r.timestamp.substring(0, 19))}</td>
+                            <td>${r.f_flash.toFixed(4)}</td>
+                            <td>${r.f_app.toFixed(4)}</td>
+                            <td>${r.f_reelle.toFixed(6)}</td>
+                            <td class="${ecartClass}">${r.ecart_hz > 0 ? '+' : ''}${r.ecart_hz.toFixed(6)}</td>
+                            <td class="${marcheClass}" style="font-weight:700">${r.marche_s_j > 0 ? '+' : ''}${r.marche_s_j.toFixed(2)}</td>
+                            <td>${r.classe_dom}</td>
+                            <td>${r.nb_images}</td>
+                            <td><span class="confidence-bar"><span class="confidence-fill" style="width:${conf.toFixed(0)}%;background:${confColor}"></span></span> ${conf.toFixed(0)}%</td>
+                            <td><button class="btn-delete" onclick="deleteRow(${i})" title="Supprimer">✕</button></td>
+                        </tr>`;
+                    }).join('');
+                }
+            });
+    }
+</script>
+
+</body>
+</html>
