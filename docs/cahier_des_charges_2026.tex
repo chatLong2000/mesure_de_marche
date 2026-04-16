@@ -1,0 +1,300 @@
+\documentclass[a4paper,11pt]{article}
+
+% --- Encodage et langue ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+
+% --- Mise en page ---
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{parskip}
+\usepackage{setspace}
+\onehalfspacing
+
+% --- Polices ---
+\usepackage{lmodern}
+
+% --- Tableaux ---
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+
+% --- Mathématiques ---
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+% --- Listes ---
+\usepackage{enumitem}
+
+% --- Liens ---
+\usepackage[colorlinks=true, linkcolor=blue!60!black, urlcolor=blue!60!black]{hyperref}
+
+% --- En-tête / pied de page ---
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Cahier des charges --- Mesure de la marche V2026}
+\fancyhead[R]{\small Robin \& Thoma}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% --- Code inline ---
+\usepackage{xcolor}
+\definecolor{codebg}{gray}{0.95}
+\newcommand{\code}[1]{\colorbox{codebg}{\texttt{#1}}}
+
+% ======================================================================
+\begin{document}
+
+% --- Page de titre ---
+\begin{titlepage}
+    \centering
+    \vspace*{3cm}
+    {\Huge\bfseries Cahier des charges\par}
+    \vspace{0.8cm}
+    {\LARGE Mesure de la marche V2026\par}
+    \vspace{1.5cm}
+    {\Large Robin \& Thoma\par}
+    \vspace{2cm}
+    {\large Projet interdisciplinaire HES-SO Master\\
+    Printemps 2026\par}
+    \vfill
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% ======================================================================
+\section{Introduction}
+
+Ce document décrit le projet interdisciplinaire «~Contrôle Horloger Intelligent~» dans sa version 2026. Il s'inscrit dans la continuité des travaux menés en 2025 et vise à aboutir à un système capable de mesurer automatiquement la marche d'une montre mécanique par voie optique.
+
+Le projet n'est pas terminé. Ce cahier des charges pose le cadre de ce qui a été fait, de ce qui reste à faire, et des objectifs que nous cherchons à atteindre d'ici la fin du semestre.
+
+% ======================================================================
+\section{Contexte et problématique}
+
+\subsection{Qu'est-ce que la marche~?}
+
+La \textbf{marche} d'une montre mécanique est l'écart entre sa fréquence réelle de battement et sa fréquence nominale, exprimé en secondes par jour. Concrètement, une montre qui «~avance~» de 5~secondes par jour a une marche de $+5$~s/j. Les normes COSC imposent une tolérance de \textbf{$-4$ à $+6$~s/j} pour certifier un chronomètre.
+
+\subsection{Comment la mesure-t-on aujourd'hui~?}
+
+La méthode standard dans l'industrie est \textbf{acoustique}~: un microphone capte les «~tic-tac~» du mécanisme et un appareil (Witschi, Timegrapher) en déduit la fréquence. C'est fiable, rapide, bien maîtrisé.
+
+\subsection{Pourquoi une approche optique~?}
+
+L'idée de ce projet est d'explorer une alternative \textbf{par imagerie stroboscopique}. Le principe~: on éclaire le balancier d'une montre avec un flash à une fréquence très proche de sa fréquence propre. En résulte un effet de «~ralenti apparent~» --- comme une roue qui semble tourner lentement sous un éclairage néon. En analysant ce mouvement apparent image par image, on peut remonter à la fréquence réelle du balancier et donc calculer la marche.
+
+Cette approche présente un intérêt pour les cas où la méthode acoustique est inadaptée (mouvements silencieux, environnement bruité) et ouvre la porte à des analyses visuelles complémentaires (détection d'anomalies, état des composants).
+
+% ======================================================================
+\section{Ce qui a été réalisé en 2025}
+
+L'édition 2025 du projet a posé les fondations matérielles et logicielles du système. Voici ce dont nous héritons.
+
+\subsection{Station d'acquisition}
+
+Une station physique a été conçue et fabriquée (pièces imprimées 3D, fichiers CAO en STEP disponibles). Elle comprend~:
+
+\begin{itemize}
+    \item Un \textbf{dôme} d'éclairage avec LED commandée par un microcontrôleur RPi Pico
+    \item Un \textbf{support montre} ajustable
+    \item Des \textbf{bras de réglage X/Y} pour le positionnement de la caméra
+    \item Une \textbf{caméra GigE Vision} SVS EXO273CGE ($1440 \times 1080$, monochrome)
+\end{itemize}
+
+Le flasher est piloté par liaison série (USB-UART, 115\,200~baud). Le protocole est simple~: des commandes texte au format \code{commande:valeur;} permettent de régler la période du flash, la durée de l'éclair, l'exposition, etc.
+
+\subsection{Interface de contrôle (GUI)}
+
+L'équipe 2025 a développé une application graphique complète sous PyQt6 pour piloter manuellement le système~:
+
+\begin{itemize}
+    \item Contrôle en temps réel des 6~paramètres du flasher via sliders et champs texte
+    \item Connexion caméra avec prévisualisation live et réticule configurable
+    \item Mode burst (rafale de 2 à 60~images) pour capturer des séquences du balancier
+    \item Sauvegarde/chargement de configurations (format \code{.ini})
+    \item Logs série en temps réel
+    \item Mode test (port série fictif + caméra factice) pour développer sans matériel
+\end{itemize}
+
+\subsection{Classification des images}
+
+Un classifieur par analyse de signal a été développé. Il prend 4~images consécutives en entrée et identifie la situation de la dernière image en 4~classes~:
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{c l l}
+        \toprule
+        \textbf{Classe} & \textbf{Ce qu'on observe} & \textbf{Ce que ça signifie} \\
+        \midrule
+        0 & 1 pic d'intensité & Le balancier est quasi-statique dans le champ \\
+        1 & 2 pics (faible $\to$ fort) & Il s'approche de sa position d'équilibre \\
+        2 & 2 pics (fort $\to$ faible) & Il s'éloigne de sa position d'équilibre \\
+        3 & 3 pics & Il traverse l'équilibre --- c'est le «~saut~» \\
+        \bottomrule
+    \end{tabular}
+    \caption{Classes de classification du signal du balancier.}
+    \label{tab:classes}
+\end{table}
+
+La méthode repose sur une soustraction de la médiane des images, l'extraction d'un profil d'intensité perpendiculaire au signal, et une détection de pics (\code{scipy.signal.find\_peaks}).
+
+\subsection{En résumé~: ce qui marchait, ce qui manquait}
+
+À la fin de 2025, on disposait d'un système \textbf{interactif}~: un opérateur pouvait capturer des images, les classifier, et observer visuellement si le flash était synchronisé. Mais tout était \textbf{manuel}. Il n'y avait pas de boucle de rétroaction automatique, pas de calcul de marche, pas de validation métrologique.
+
+% ======================================================================
+\section{Objectifs de la version 2026}
+
+Notre ambition pour 2026 est de transformer ce prototype interactif en un \textbf{outil de mesure autonome}. Concrètement~:
+
+\begin{enumerate}
+    \item \textbf{Automatiser la synchronisation} --- Le système doit pouvoir ajuster lui-même la fréquence du flash jusqu'à se caler sur le balancier, sans intervention humaine.
+
+    \item \textbf{Calculer la marche} --- Une fois synchronisé, le système doit mesurer la fréquence apparente du balancier et en déduire la marche en s/j.
+
+    \item \textbf{Valider la mesure} --- Il faut pouvoir comparer nos résultats avec une référence (si possible) et caractériser la précision du système (répétabilité, justesse, incertitude).
+
+    \item \textbf{Bonus} --- Optimisation de la classification~? GUI~?
+\end{enumerate}
+
+% ======================================================================
+\section{Description fonctionnelle}
+
+\subsection{Pilotage du flasher}
+
+On reprend le protocole série existant (RPi Pico). Les paramètres clés sont~:
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{l l l}
+        \toprule
+        \textbf{Paramètre} & \textbf{Rôle} & \textbf{Plage} \\
+        \midrule
+        \code{trig\_off}   & Période du flash (détermine la fréquence) & $1\,000$ -- $1\,000\,000$~µs \\
+        \code{flash\_on}   & Durée de l'éclair               & $1$ -- $100\,000$~µs \\
+        \code{flash\_off}  & Temps entre fin d'éclair et prochain trigger & $1$ -- $100\,000$~µs \\
+        \code{trig\_expo}  & Temps minimal d'exposition       & $0$ -- $200$~µs \\
+        \code{trig\_shift} & Décalage temporel du trigger     & $0$ -- $100\,000$~µs \\
+        \bottomrule
+    \end{tabular}
+    \caption{Paramètres de commande du flasher.}
+    \label{tab:flasher-params}
+\end{table}
+
+Le \code{trig\_off} est le paramètre central~: c'est lui qu'on ajuste pendant la synchronisation. Sa valeur initiale dépend du calibre de la montre~:
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{r r r}
+        \toprule
+        \textbf{Calibre (A/h)} & \textbf{Fréquence nominale (Hz)} & \textbf{\code{trig\_off} initial (µs)} \\
+        \midrule
+        18\,000 & 2.5 & 400\,000 \\
+        21\,600 & 3.0 & 333\,333 \\
+        25\,200 & 3.5 & 285\,714 \\
+        28\,800 & 4.0 & 250\,000 \\
+        36\,000 & 5.0 & 200\,000 \\
+        \bottomrule
+    \end{tabular}
+    \caption{Valeurs initiales de \code{trig\_off} selon le calibre.}
+    \label{tab:calibres}
+\end{table}
+
+\subsection{Acquisition d'images}
+
+Points importants~:
+
+\begin{itemize}
+    \item Résolution~: à déterminer.
+    \item Les images sont très sombres. On applique une \textbf{normalisation CLAHE} (\emph{Contrast Limited Adaptive Histogram Equalization}) pour rendre les images exploitables pour l'affichage. Son utilisation avant la classification est en cours de test.
+\end{itemize}
+
+\subsection{Classification}
+
+On reprend le classifieur de 2025 avec des ajustements. Le principe reste le même~: à partir de 4~images, on soustrait la médiane, on extrait un profil d'intensité perpendiculaire, et on compte les pics pour déterminer la classe (0, 1, 2, 3 ou $-1$ si inclassable).
+
+\subsection{Synchronisation automatique}
+
+C'est la pièce maîtresse de la version 2026. L'idée~: ajuster automatiquement \code{trig\_off} pour que la fréquence du flash colle à celle du balancier. Quand c'est le cas, on observe un cycle stable de classes ($0 \to 1 \to 3 \to 2 \to 0 \to \ldots$).
+
+\medskip
+\noindent\textit{(Phase de test)}
+
+\medskip
+L'algorithme envisagé fonctionne en deux phases~:
+
+\begin{enumerate}
+    \item \textbf{SEARCH} --- On balaie \code{trig\_off} par pas grossiers (de l'ordre de 100~µs) autour de la valeur nominale, dans les deux directions. Le but est de trouver la zone où des classes 1, 2 ou 3 apparaissent. Sans cette phase de recherche large, on peut facilement passer à côté si la fréquence réelle de la montre est un peu éloignée de la nominale.
+
+    \item \textbf{LOCK} --- Une fois la zone trouvée, on passe en pas fins (de l'ordre de 10~µs) pour stabiliser le taux de classes~3 dans une fenêtre glissante. Le verrouillage est confirmé après plusieurs itérations stables.
+\end{enumerate}
+
+Ce mécanisme est encore en cours de mise au point. Les premiers essais ont révélé des problèmes de convergence (balayage unidirectionnel qui dérive sans jamais trouver, faux verrouillage sans vraie classe~3). L'approche bidirectionnelle et les critères de verrouillage doivent encore être validés sur le matériel.
+
+\subsection{Calcul de la marche}
+
+Une fois le flash synchronisé, on acquiert des images pendant une durée configurable (10~secondes par défaut) et on mesure la fréquence apparente du balancier.
+
+Le principe mathématique~:
+
+\begin{equation}
+    f_{\text{réelle}} = f_{\text{flash}} + f_{\text{apparente}} \times \text{signe}
+\end{equation}
+
+\begin{equation}
+    \text{marche} = \frac{f_{\text{réelle}} - f_{\text{nominale}}}{f_{\text{nominale}}} \times 86\,400 \;\text{s/j}
+\end{equation}
+
+La fréquence apparente se déduit du nombre de cycles complets observés (transitions $0 \to 1 \to 3 \to 2 \to 0$) sur la durée de mesure. Le signe (avance ou retard) est déterminé par l'ordre d'apparition des classes~1 et~2.
+
+% ======================================================================
+\section{Contraintes techniques}
+
+\subsection{Matériel existant}
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{l l l}
+        \toprule
+        \textbf{Composant} & \textbf{Modèle / Détail} & \textbf{Remarque} \\
+        \midrule
+        Caméra    & SVS EXO273CGE, $1440 \times 1080$, mono & GigE Vision, compatible Aravis \\
+        Éclairage & LED + RPi Pico              & Firmware série existant \\
+        Station   & Pièces imprimées 3D          & CAO livrée (STEP) \\
+        Liaison   & USB-UART                     & Protocole texte \code{cmd:val;} \\
+        \bottomrule
+    \end{tabular}
+    \caption{Matériel du banc de mesure.}
+    \label{tab:materiel}
+\end{table}
+
+\subsection{Logiciel}
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{l l}
+        \toprule
+        \textbf{Critère} & \textbf{Choix} \\
+        \midrule
+        Langage              & Python $\geq$ 3.10 \\
+        Pilote caméra        & Aravis via PyGObject (GI v0.8) \\
+        Traitement d'image   & OpenCV, NumPy \\
+        Analyse de signal    & SciPy (\code{find\_peaks}) \\
+        Communication série  & pyserial \\
+        OS cible             & macOS (ARM/Intel), Linux \\
+        \bottomrule
+    \end{tabular}
+    \caption{Choix logiciels.}
+    \label{tab:logiciel}
+\end{table}
+
+\vfill
+\begin{center}
+    \rule{0.5\textwidth}{0.4pt}\\[0.5em]
+    \textit{Projet interdisciplinaire HES-SO Master --- Contrôle Horloger Intelligent, printemps 2026.}
+\end{center}
+
+\end{document}
