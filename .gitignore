@@ -1,1 +1,9 @@
 test_camera.py
+test_captures/
+__pycache__/
+auto/__pycache__/
+predictor/__pycache__/
+docs/
+debug/
+captures/
+.DS_Store

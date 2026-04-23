@@ -12,6 +12,8 @@ from datetime import datetime
 import cv2
 import numpy as np
 
+from async_saver import save_image_async
+
 
 class AutoSynchronizer:
     """
@@ -127,7 +129,10 @@ class AutoSynchronizer:
                     continue
 
                 # -- Classifier --
+                t_cls = time.perf_counter()
                 classe = self.classifier.predict(list(image_buffer))
+                dt_cls = (time.perf_counter() - t_cls) * 1000
+                print(f"    [CHRONO] predict: {dt_cls:.1f} ms")
                 self.history.append(classe)
 
                 # Détection de saut (classe 3 ou transition 1↔2)
@@ -253,12 +258,11 @@ class AutoSynchronizer:
 
     def _save_class3_frame(self, frame: np.ndarray, iteration: int,
                            prefix: str = "sync_class3"):
-        """Enregistre une image sur disque."""
+        """Enregistre une image sur disque (asynchrone)."""
         out_dir = "captures/class3_sync"
-        os.makedirs(out_dir, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
         fname = os.path.join(out_dir, f"{prefix}_{iteration:04d}_{ts}.png")
-        cv2.imwrite(fname, frame)
+        save_image_async(fname, frame)
         print(f"    [SAVE] {fname}")
 
     def _estimate_jump_position(self) -> float:

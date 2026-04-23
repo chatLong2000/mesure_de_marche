@@ -38,6 +38,7 @@ import cv2
 import numpy as np
 
 # Modules internes
+from async_saver import save_image_async, shutdown_saver
 from predictor import SignalClassifier
 from auto import (
     AutoSynchronizer, RateCalculator, PerformanceValidator,
@@ -80,10 +81,10 @@ class Flasher:
     def __init__(self, ser):
         self.ser = ser
         self.trig_enabled = False
-        self.current_trig_off = 92000    # µs par défaut
-        self.current_flash_on = 1000     # µs
-        self.current_flash_off = 15000   # µs
-        self.current_trig_expo = 19      # µs
+        self.current_trig_off = 680008    # µs par défaut
+        self.current_flash_on = 10000     # µs
+        self.current_flash_off = 85417   # µs
+        self.current_trig_expo = 9000     # µs
         self.current_trig_shift = 1000   # µs
 
     def _send_cmd(self, cmd: str) -> None:
@@ -275,6 +276,11 @@ class AravisCamera:
 
         img = self._buffer_to_numpy(buf)
         self.stream.push_buffer(buf)
+        
+        #save frame for debug with rand suffix
+        date = time.strftime("%Y%m%d_%H%M%S")
+        rand_suffix = f"{date}_{np.random.randint(1000, 9999)}"
+        save_image_async(f"debug/debug_frame_{rand_suffix}.png", img)
         return img
 
     def capture_sequence(self, count: int, interval_ms: float = 0) -> list:
@@ -282,7 +288,9 @@ class AravisCamera:
         images = []
         for i in range(count):
             frame = self.capture_frame()
+            #save frame for debug
             if frame is not None:
+                save_image_async(f"debug/debug_sequence_frame_{i}.png", frame)
                 # Convertir en niveaux de gris si couleur
                 if len(frame.shape) == 3:
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -403,11 +411,11 @@ def parse_args():
     parser.add_argument("--calibre", default="28800",
                         choices=list(FREQ_NOMINALES.keys()),
                         help="Fréquence nominale du calibre en A/h (défaut: 28800)")
-    parser.add_argument("--trig-off", type=int, default=250000,
+    parser.add_argument("--trig-off", type=int, default=100000,
                         help="T_trig_off initial en µs (défaut: 250000 → 4 Hz)")
-    parser.add_argument("--flash-on", type=int, default=1000,
+    parser.add_argument("--flash-on", type=int, default=60000,
                         help="Durée flash ON en µs (défaut: 1000)")
-    parser.add_argument("--exposure", type=int, default=10000,
+    parser.add_argument("--exposure", type=int, default=50000,
                         help="Temps d'exposition caméra en µs (défaut: 10000)")
     parser.add_argument("--duration", type=float, default=10.0,
                         help="Durée de mesure en secondes (défaut: 10)")
@@ -427,7 +435,10 @@ def parse_args():
 
 
 def main():
-    args = parse_args()
+    args = parse_args() 
+    
+    #print exposure for debug
+    print(f"[DEBUG] Exposure caméra : {args.exposure} µs")
 
     print("=" * 60)
     print("  MESURE DE MARCHE HORLOGÈRE — v2026")
@@ -526,6 +537,7 @@ def main():
         camera.stop_acquisition() if hasattr(camera, 'stop_acquisition') else None
         camera.disconnect()
         ser.close()
+        shutdown_saver()  # Attendre la fin des écritures async
         print("[INFO] Terminé.")
 
 
