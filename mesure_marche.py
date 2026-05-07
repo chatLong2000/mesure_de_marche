@@ -38,8 +38,8 @@ import cv2
 import numpy as np
 
 # Modules internes
-from predictor import SignalClassifier
-from auto import (
+from src.predictor import SignalClassifier
+from src import (
     AutoSynchronizer, RateCalculator, PerformanceValidator,
     MeasureResult, WitschiComparison, FREQ_NOMINALES, SECONDS_PER_DAY,
 )
