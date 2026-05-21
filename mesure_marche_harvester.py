@@ -86,15 +86,16 @@ def main():
     f_nominale = FREQ_NOMINALES[args.calibre]
     print(f"\n[INFO] Calibre : {args.calibre} A/h → f_nominale = {f_nominale} Hz")
 
-    flasher.trig_off(680008)
+    flasher.trig_off(826166)
     time.sleep(1)
-    flasher.trig_expo(19)
+    flasher.trig_expo(1) # NOT USED, DETERMINED BY T_FLASH
+    # flasher.trig_expo(19)
     time.sleep(1)
-    flasher.trig_shift(1000)
+    flasher.trig_shift(0)
     time.sleep(1)
-    flasher.flash_on(1000)
+    flasher.flash_on(10000)
     time.sleep(1)
-    flasher.flash_off(85417)
+    flasher.flash_off(58417)
     time.sleep(1)
 
     flasher.print_config()

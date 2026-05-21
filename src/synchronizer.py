@@ -38,14 +38,14 @@ class AutoSynchronizer:
     """
 
     # Paramètres de l'algorithme
-    COARSE_STEP_US = 100          # Pas large pour la recherche (µs)
+    COARSE_STEP_US = 1000          # Pas large pour la recherche (µs)
     FINE_STEP_US = 10             # Pas fin pour le verrouillage (µs)
     WINDOW_SIZE = 20              # Nb d'images dans la fenêtre d'analyse
     TARGET_JUMP_POSITION = 0.5    # Position cible du saut dans le cycle (0.5 = milieu)
     TOLERANCE = 0.15              # Tolérance sur la position (±15%)
     MAX_ITERATIONS = 1000         # Itérations max avant abandon
     CONVERGENCE_COUNT = 20         # Nb de mesures stables pour déclarer la convergence
-    MAX_SWEEP_US = 5000           # Distance max de balayage avant inversion (µs)
+    MAX_SWEEP_US = 50000           # Distance max de balayage avant inversion (µs)
     MIN_SAUT_COUNT = 2            # Nb minimum de sauts pour autoriser le verrouillage
     DARK_FRAME_THRESHOLD = 30     # Seuil p99 pour détecter les frames illuminées
 
@@ -86,12 +86,18 @@ class AutoSynchronizer:
         stable_count = 0
         lock_miss_count = 0           # Compteur d'itérations sans classe 3 en LOCK
         LOCK_MISS_LIMIT = 2 * self.WINDOW_SIZE  # Retour SEARCH si trop de miss
-        image_buffer = []  # Buffer glissant de 4 images
+        # image_buffer = []  # Buffer glissant de 4 images
         dark_skip_count = 0  # Compteur de frames sombres filtrées
+
+        four_image_buffer = []
 
         try:
             iteration = 0
             while iteration < self.MAX_ITERATIONS:
+                
+                start = time.time()
+
+
                 # -- Capturer une nouvelle image --
                 frame = self.camera.capture_frame()
 
@@ -106,21 +112,26 @@ class AutoSynchronizer:
                 # print(f"    [SAVE] {fname}")
                 
                 # Buffer glissant : garder les 4 dernières images (raw, sans CLAHE)
-                image_buffer.append(frame)
-                iteration += 1
-                if len(image_buffer) > 4:
-                    image_buffer.pop(0)
-
-                # -- Affichage live --
-                if self.show_preview:
-                    self._show_frame(frame, len(image_buffer))
-
-                # On a besoin de 4 images minimum pour classifier
-                if len(image_buffer) < 4:
-                    continue
+                # image_buffer.append(frame)
+                # iteration += 1
+                # if len(image_buffer) > 4:
+                #     image_buffer.pop(0)
 
                 # -- Classifier --
-                classe = self.classifier.predict(list(image_buffer))
+                # four_image_buffer.append(frame)
+                # four_image_buffer.append(frame)
+                # four_image_buffer.append(frame)
+                # four_image_buffer.append(frame)
+                # classe = self.classifier.predict(four_image_buffer)
+                # four_image_buffer = []
+
+                classe = self.classifier.predict_right(frame)
+                
+                end = time.time()
+                length = end - start
+                print("It took", length, "seconds!")
+
+
                 self.history.append(classe)
 
                 # Détection de saut (classe 3 ou transition 1↔2)
@@ -197,9 +208,6 @@ class AutoSynchronizer:
 
         finally:
             self.camera.stop_acquisition()
-
-        if self.show_preview:
-            cv2.destroyWindow("Synchro — Live")
 
         if not self.locked:
             print(f"\n  ✗ Non verrouillé après {self.MAX_ITERATIONS} itérations")

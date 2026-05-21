@@ -65,7 +65,7 @@ class RateCalculator:
 
         classifications = []
         timestamps = []
-        image_buffer = []
+        # image_buffer = []
         t_start = time.time()
 
         try:
@@ -74,24 +74,24 @@ class RateCalculator:
                 if frame is None:
                     continue
 
-                if len(frame.shape) == 3:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                # if len(frame.shape) == 3:
+                #     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-                # Filtrer les frames sombres (non illuminées par le flash)
-                if not self.camera.hw_trigger:
-                    brightness = np.percentile(frame, 99)
-                    if brightness < self.DARK_FRAME_THRESHOLD:
-                        continue
+                # # Filtrer les frames sombres (non illuminées par le flash)
+                # if not self.camera.hw_trigger:
+                #     brightness = np.percentile(frame, 99)
+                #     if brightness < self.DARK_FRAME_THRESHOLD:
+                #         continue
 
                 # Buffer glissant (raw, sans CLAHE)
-                image_buffer.append(frame)
-                if len(image_buffer) > 4:
-                    image_buffer.pop(0)
+                # image_buffer.append(frame)
+                # if len(image_buffer) > 4:
+                #     image_buffer.pop(0)
 
-                if len(image_buffer) < 4:
-                    continue
+                # if len(image_buffer) < 4:
+                #     continue
 
-                classe = self.classifier.predict(list(image_buffer))
+                classe = self.classifier.predict_right(frame)
                 classifications.append(classe)
                 # timestamps.append(time.time())
                 timestamps.append(time.perf_counter())
@@ -102,10 +102,6 @@ class RateCalculator:
                     if self.classifier.last_processed is not None:
                         self._save_class3_frame(self.classifier.last_processed, len(classifications), prefix="mesure_processed")
 
-                # -- Affichage live --
-                if self.show_preview:
-                    self._show_frame(frame, classe, classifications, t_start)
-
                 if verbose and len(classifications) % 10 == 0:
                     elapsed = time.time() - t_start
                     print(f"  [{elapsed:.1f}s] {len(classifications)} classifications, "
@@ -113,8 +109,6 @@ class RateCalculator:
 
         finally:
             self.camera.stop_acquisition()
-            if self.show_preview:
-                cv2.destroyWindow("Mesure — Live")
 
         # -- Analyser les résultats --
         if len(classifications) < 10:

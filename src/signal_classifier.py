@@ -2,6 +2,10 @@ import numpy as np
 import cv2
 from scipy.signal import find_peaks
 
+# tmp
+import os
+from datetime import datetime
+
 class SignalClassifier():
     def __init__(self, height_threshold=10):
         self.height_threshold = height_threshold
@@ -75,6 +79,13 @@ class SignalClassifier():
 
         # Seuillage pour obtenir une image binaire
         _, img_thresh = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY)
+
+        # out_dir = "captures/before_after_seuil"
+        # os.makedirs(out_dir, exist_ok=True)
+        # ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+        # fname = os.path.join(out_dir, f"img_thresh_{ts}.png")
+        # cv2.imwrite(fname, img_thresh)
+
         # Trouver les pixels non nuls
         ys, xs = np.where(img_thresh > 0)
         coords = np.column_stack((xs, ys))
@@ -160,12 +171,6 @@ class SignalClassifier():
         if len(images) != 4:
             raise ValueError("Il faut exactement 4 images.")
 
-        # print(images)
-        # print(images[0])
-        # print(images[1])
-        # print(images[2])
-        # print(images[3])
-
         processed = self.subtract_median(images)
         profile, valid = self.extract_perpendicular_vector(processed)
 
@@ -173,3 +178,30 @@ class SignalClassifier():
             return -1
 
         return self.classify_signal(profile)
+
+    def predict_right(self, image):
+
+        result = self.crop_to_square(image)
+        
+        out_dir = "captures/before_after_seuil"
+        os.makedirs(out_dir, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+        fname = os.path.join(out_dir, f"{ts}.png")
+        cv2.imwrite(fname, result)
+
+        result[result < 30] = 0
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+        fname = os.path.join(out_dir, f"{ts}.png")
+        cv2.imwrite(fname, result)
+        
+        profile, valid = self.extract_perpendicular_vector(result)
+
+        if not valid:
+            # print("NOT VALID extract_perpendicular_vector")
+            return -1
+
+
+        # print("VALID extract_perpendicular_vector")
+        return self.classify_signal(profile)
+
