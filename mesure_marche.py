@@ -209,9 +209,9 @@ def parse_args():
                         help="Cible filmée : 'balance' (balancier, f=bph/7200) "
                              "ou 'seconds' (aiguille des secondes, f=bph/3600). "
                              "En mode 'seconds' la fréquence est doublée.")
-    parser.add_argument("--trig-off", type=int, default=250000,
+    parser.add_argument("--trig-off", type=int, default=853166,
                         help="T_trig_off initial en µs (défaut: 250000 → 4 Hz)")
-    parser.add_argument("--flash-on", type=int, default=1000,
+    parser.add_argument("--flash-on", type=int, default=10000,
                         help="Durée flash ON en µs (défaut: 1000)")
     parser.add_argument("--exposure", type=int, default=1000,
                         help="Temps d'exposition caméra en µs (défaut: 10000)")
@@ -236,7 +236,7 @@ def parse_args():
                              "pendant la synchro dans captures/debug_sync/run_<timestamp>/")
     parser.add_argument("--peak-height", type=int, default=5,
                         help="Seuil de hauteur des pics pour la classification (défaut: 5)")
-    parser.add_argument("--subtract-threshold", type=int, default=10,
+    parser.add_argument("--subtract-threshold", type=int, default=20,
                         help="Seuil de bruit après soustraction de médiane (défaut: 15)")
     parser.add_argument("--output", default=DEFAULT_OUTPUT,
                         help="Fichier CSV de sortie "
@@ -358,11 +358,11 @@ def main():
     time.sleep(1)
     flasher.trig_expo(19)
     time.sleep(1)
-    flasher.trig_shift(1000)
+    flasher.trig_shift(0)
     time.sleep(1)
     flasher.flash_on(args.flash_on)
     time.sleep(1)
-    flasher.flash_off(85417)
+    flasher.flash_off(58417)
     time.sleep(1)
 
     flasher.print_config()

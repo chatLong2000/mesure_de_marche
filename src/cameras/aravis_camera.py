@@ -57,10 +57,22 @@ class AravisCamera:
             raise RuntimeError("Impossible d'obtenir le contrôle exclusif de la caméra.")
 
         # Configuration
+        dev = self.camera.get_device()
+
+        # Exposure
         try:
-            self.camera.set_exposure_time(self.exposure_us)
+            dev.set_string_feature_value("ExposureAuto", "Off")
         except Exception as e:
-            print(f"[CAM WARN] ExposureTime: {e}")
+            print(f"[CAM WARN] ExposureAuto: {e}")
+        # try:
+        #     self.camera.set_exposure_time(self.exposure_us)
+        # except Exception as e:
+        #     print(f"[CAM WARN] ExposureTime: {e}")
+        try:
+            dev.set_string_feature_value("ExposureMode", "TriggerWidth")
+            # dev.set_string_feature_value("ExposureMode", "Timed")
+        except Exception as e:
+            print(f"[CAM WARN] ExposureMode: {e}")
 
         try:
             self.camera.set_gain(self.gain_db)
