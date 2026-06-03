@@ -35,7 +35,6 @@ La tolérance de référence COSC pour un chronomètre mécanique est de **−4 
 ```
 mesure_marche.py        Script principal (CLI) : synchro, mesure, calcul, validation
 app.py                  Application web Flask (pilotage + visualisation)
-test_camera.py          Test isolé de la caméra et du flasher
 templates/index.html    Interface web
 results/                Résultats de mesure (CSV)
 captures/               Frames sauvegardées (debug, synchro)
