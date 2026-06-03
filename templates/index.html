@@ -7,16 +7,16 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
     <style>
         :root {
-            --bg: #0f1117;
-            --surface: #1a1d27;
-            --border: #2a2d3a;
-            --text: #e0e0e6;
-            --text2: #9095a5;
-            --accent: #4f8cff;
-            --accent2: #38d9a9;
-            --red: #ff6b6b;
-            --orange: #ffa94d;
-            --green: #51cf66;
+            --bg: #f4f6fb;
+            --surface: #ffffff;
+            --border: #e2e6ef;
+            --text: #1f2430;
+            --text2: #6b7280;
+            --accent: #2563eb;
+            --accent2: #0d9488;
+            --red: #e23b3b;
+            --orange: #f08c00;
+            --green: #1ca64c;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -47,7 +47,7 @@
             font-weight: 600;
         }
         .badge-idle { background: var(--border); color: var(--text2); }
-        .badge-running { background: #1a3a2a; color: var(--green); animation: pulse 1.5s infinite; }
+        .badge-running { background: #d7f5e3; color: var(--green); animation: pulse 1.5s infinite; }
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.6; }
@@ -61,6 +61,7 @@
             border: 1px solid var(--border);
             border-radius: 8px;
             padding: 1rem;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
         }
         .card-label { font-size: 0.7rem; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; }
         .card-value { font-size: 1.6rem; font-weight: 700; margin-top: 0.3rem; }
@@ -114,7 +115,7 @@
             border-top: 1px solid var(--border);
             white-space: nowrap;
         }
-        tr:hover td { background: rgba(79, 140, 255, 0.05); }
+        tr:hover td { background: rgba(37, 99, 235, 0.06); }
         .positive { color: var(--green); }
         .negative { color: var(--red); }
         .confidence-bar {
@@ -216,7 +217,7 @@
 <body>
 
 <header>
-    <h1>⏱ Mesure de Marche <span>— v2026</span></h1>
+    <h1>⏱ Mesure de Marche <span>- v2026</span></h1>
     <span id="statusBadge" class="badge badge-idle">IDLE</span>
 </header>
 
@@ -279,6 +280,10 @@
                 <div class="form-group form-check">
                     <input type="checkbox" id="inputSkipSync">
                     <label style="margin:0">Passer la synchronisation</label>
+                </div>
+                <div class="form-group form-check">
+                    <input type="checkbox" id="inputSimulateFinal">
+                    <label style="margin:0">Calcul final simulé (démo COSC)</label>
                 </div>
                 <div class="btn-row">
                     <button class="btn btn-primary" id="btnStart" onclick="startMeasure()">▶ Lancer</button>
@@ -383,8 +388,8 @@
                 {
                     label: 'Marche (s/j)',
                     data: marcheData,
-                    borderColor: '#4f8cff',
-                    backgroundColor: 'rgba(79,140,255,0.1)',
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37,99,235,0.1)',
                     fill: true,
                     tension: 0.3,
                     pointRadius: 4,
@@ -394,8 +399,8 @@
                 {
                     label: 'Confiance (%)',
                     data: confData,
-                    borderColor: '#38d9a9',
-                    backgroundColor: 'rgba(56,217,169,0.08)',
+                    borderColor: '#0d9488',
+                    backgroundColor: 'rgba(13,148,136,0.08)',
                     fill: false,
                     tension: 0.3,
                     pointRadius: 3,
@@ -409,29 +414,29 @@
             maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
             plugins: {
-                legend: { labels: { color: '#9095a5', font: { family: 'inherit', size: 11 } } },
+                legend: { labels: { color: '#6b7280', font: { family: 'inherit', size: 11 } } },
                 tooltip: {
-                    backgroundColor: '#1a1d27',
-                    borderColor: '#2a2d3a',
+                    backgroundColor: '#ffffff',
+                    borderColor: '#e2e6ef',
                     borderWidth: 1,
-                    titleColor: '#e0e0e6',
-                    bodyColor: '#e0e0e6',
+                    titleColor: '#1f2430',
+                    bodyColor: '#1f2430',
                 }
             },
             scales: {
                 x: {
-                    ticks: { color: '#9095a5', font: { size: 10 }, maxRotation: 45 },
-                    grid: { color: 'rgba(42,45,58,0.5)' }
+                    ticks: { color: '#6b7280', font: { size: 10 }, maxRotation: 45 },
+                    grid: { color: 'rgba(226,230,239,0.8)' }
                 },
                 y: {
-                    title: { display: true, text: 's/jour', color: '#4f8cff' },
-                    ticks: { color: '#9095a5' },
-                    grid: { color: 'rgba(42,45,58,0.5)' },
+                    title: { display: true, text: 's/jour', color: '#2563eb' },
+                    ticks: { color: '#6b7280' },
+                    grid: { color: 'rgba(226,230,239,0.8)' },
                 },
                 y1: {
                     position: 'right',
-                    title: { display: true, text: 'Confiance %', color: '#38d9a9' },
-                    ticks: { color: '#9095a5' },
+                    title: { display: true, text: 'Confiance %', color: '#0d9488' },
+                    ticks: { color: '#6b7280' },
                     grid: { drawOnChartArea: false },
                     min: 0, max: 100,
                 },
@@ -449,9 +454,11 @@
             duration: parseFloat(document.getElementById('inputDuration').value),
             trig_off: parseInt(document.getElementById('inputTrigOff').value),
             skip_sync: document.getElementById('inputSkipSync').checked,
+            simulate_final: document.getElementById('inputSimulateFinal').checked,
         };
         // Effacer le journal au lancement d'une nouvelle mesure
-        document.getElementById('logPanel').innerHTML = '';
+        document.getElementById('logPanel').innerHTML =
+            '<div class="log-line">● Démarrage de la mesure…</div>';
 
         fetch('/api/start', {
             method: 'POST',
@@ -462,10 +469,15 @@
         .then(data => {
             if (data.error) { alert(data.error); return; }
             setRunning(true);
-            pollStatus();
-            pollTimer = setInterval(pollStatus, 1000);
+            startPolling();
         })
         .catch(err => alert('Erreur: ' + err));
+    }
+
+    function startPolling() {
+        if (pollTimer) clearInterval(pollTimer);
+        pollStatus();
+        pollTimer = setInterval(pollStatus, 500);
     }
 
     function stopMeasure() {
@@ -487,8 +499,12 @@
             .then(r => r.json())
             .then(data => {
                 const panel = document.getElementById('logPanel');
-                panel.innerHTML = data.log.map(l => `<div class="log-line">${escapeHtml(l)}</div>`).join('');
-                panel.scrollTop = panel.scrollHeight;
+                if (data.log && data.log.length) {
+                    // N'auto-scroller que si l'utilisateur est déjà en bas
+                    const atBottom = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 40;
+                    panel.innerHTML = data.log.map(l => `<div class="log-line">${escapeHtml(l)}</div>`).join('');
+                    if (atBottom) panel.scrollTop = panel.scrollHeight;
+                }
 
                 if (!data.running && pollTimer) {
                     clearInterval(pollTimer);
@@ -561,6 +577,17 @@
                 }
             });
     }
+
+    // ── Reprise automatique au chargement de la page ─────────
+    // Si une mesure est déjà en cours, on affiche le journal et on relance le polling.
+    fetch('/api/status')
+        .then(r => r.json())
+        .then(data => {
+            if (data.running) {
+                setRunning(true);
+                startPolling();
+            }
+        });
 </script>
 
 </body>

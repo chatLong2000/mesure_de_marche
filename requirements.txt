@@ -1,0 +1,19 @@
+# Dépendances de la mesure de marche horlogère
+# Installation : pip install -r requirements.txt
+
+# Traitement d'images et calcul numérique
+opencv-python>=4.8
+numpy>=1.24
+scipy>=1.10
+
+# Pilotage du flasher (liaison série UART)
+pyserial>=3.5
+
+# Application web
+Flask>=3.0
+
+# Pilote caméra GenICam (Linux / Raspberry Pi) — optionnel
+# harvesters>=1.4
+
+# Pilote caméra Aravis (macOS) : installé via le système (Homebrew + PyGObject),
+# non disponible sur PyPI. Voir le README.

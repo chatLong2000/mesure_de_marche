@@ -7,20 +7,29 @@ Script principal intégrant :
   2. Calcul automatisé de la marche (f_réelle → s/j)
   3. Caractérisation des performances (comparaison étalon Witschi)
 
-Architecture modulaire :
-  - predictor/  : algorithmes de classification (interchangeables)
-  - auto/       : automatisation (synchro, calcul marche, validation)
+Architecture modulaire (package src/) :
+  - src/cameras/    : pilotes caméra interchangeables (Aravis, Harvester, Dummy)
+  - src/processing/ : classification, synchro, calcul marche, validation
+  - src/hardware/   : pilotage du flasher (série UART)
+  - src/simulation/ : rejeu hors-ligne et cas idéal simulé
 
-Utilise :
-  - Aravis (GObject Introspection) pour le pilotage caméra SVS EXO273CGE
-  - Protocole série UART pour le contrôle du flasher stroboscopique
+Deux modules caméra sont disponibles (sélection via --camera) :
+  - Aravis (GObject Introspection) — pilotage caméra SVS EXO273CGE (macOS)
+  - Harvester (GenICam) — pilotage GigE (Linux / Raspberry Pi)
+Plus une caméra factice (dummy) pour les tests sans matériel.
+
+Le flasher stroboscopique est piloté par protocole série UART.
 
 Usage:
     conda activate ContrHorlo
     export GI_TYPELIB_PATH="/opt/homebrew/lib/girepository-1.0"
 
-    # Avec matériel réel :
+    # Matériel réel, détection automatique du module caméra :
     python mesure_marche.py /dev/ttyUSB0
+
+    # Forcer un module caméra :
+    python mesure_marche.py /dev/ttyUSB0 --camera aravis
+    python mesure_marche.py /dev/ttyUSB0 --camera harvester --cti /chemin/vers/GigETL.cti
 
     # Mode test (sans matériel) :
     python mesure_marche.py test
@@ -31,6 +40,7 @@ import os
 import time
 import math
 import csv
+import random
 import argparse
 from typing import Optional
 
@@ -38,25 +48,33 @@ import cv2
 import numpy as np
 
 # Modules internes
-from predictor import SignalClassifier
-from auto import (
-    AutoSynchronizer, RateCalculator, PerformanceValidator,
-    MeasureResult, WitschiComparison, FREQ_NOMINALES, SECONDS_PER_DAY,
+from src.processing.signal_classifier import SignalClassifier
+from src.processing.synchronizer import AutoSynchronizer
+from src.processing.rate_calculator import RateCalculator
+from src.processing.validator import PerformanceValidator
+from src.models import MeasureResult, WitschiComparison, FREQ_NOMINALES, SECONDS_PER_DAY
+from src.hardware.flasher import Flasher
+from src.cameras import (
+    DummyCamera,
+    AravisCamera,
+    HarvesterCamera,
+    ARAVIS_AVAILABLE,
+    HARVESTER_AVAILABLE,
+)
+from src.simulation.simulation_marche_parfaite import (
+    generate_ideal_jump_times,
+    compute_marche,
 )
 
 # ---------------------------------------------------------------------------
-# Aravis import (GigE Vision camera)
+# Chemin par défaut du fichier de résultats (dossier results/)
 # ---------------------------------------------------------------------------
-os.environ.setdefault("GI_TYPELIB_PATH", "/opt/homebrew/lib/girepository-1.0")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RESULTS_DIR = os.path.join(BASE_DIR, "results")
+DEFAULT_OUTPUT = os.path.join(RESULTS_DIR, "mesure_results.csv")
 
-try:
-    import gi
-    gi.require_version("Aravis", "0.8")
-    from gi.repository import Aravis
-    ARAVIS_AVAILABLE = True
-except (ImportError, ValueError):
-    ARAVIS_AVAILABLE = False
-    print("[WARN] Aravis non disponible — mode dummy caméra activé.")
+# Fichier CTI par défaut pour le pilote Harvester (GenICam Transport Layer)
+DEFAULT_CTI = "/home/rlaborde/master_hes/pi/VimbaX_2025-3/cti/VimbaGigETL.cti"
 
 # ---------------------------------------------------------------------------
 # Serial import
@@ -68,77 +86,15 @@ except ImportError:
     SERIAL_AVAILABLE = False
     print("[WARN] pyserial non disponible — mode dummy série activé.")
 
+# ---------------------------------------------------------------------------
+# Norme COSC — chronomètre mécanique : marche diurne moyenne ∈ [-4, +6] s/j
+# ---------------------------------------------------------------------------
+COSC_RATE_MIN_S_J = -4.0
+COSC_RATE_MAX_S_J = 6.0
+
 # ===========================================================================
 #  FLASHER — Contrôle série (repris de controler/main.py)
 # ===========================================================================
-
-class Flasher:
-    """Contrôle du flasher stroboscopique via UART."""
-
-    COMMAND_TIMEOUT = 0.15  # secondes entre chaque commande
-
-    def __init__(self, ser):
-        self.ser = ser
-        self.trig_enabled = False
-        self.current_trig_off = 92000    # µs par défaut
-        self.current_flash_on = 1000     # µs
-        self.current_flash_off = 15000   # µs
-        self.current_trig_expo = 19      # µs
-        self.current_trig_shift = 1000   # µs
-
-    def _send_cmd(self, cmd: str) -> None:
-        """Envoie une commande au flasher (protocole texte `cmd:val;`)."""
-        try:
-            full_cmd = cmd if cmd.endswith(';') else cmd + ';'
-            self.ser.write(full_cmd.encode())
-            time.sleep(self.COMMAND_TIMEOUT)
-        except Exception as e:
-            print(f"[FLASH ERR] Envoi commande '{cmd}': {e}")
-
-    # -- Commandes de base --
-    def on(self):
-        self._send_cmd("trig.en:1")
-        self.trig_enabled = True
-
-    def off(self):
-        self._send_cmd("trig.en:0")
-        self.trig_enabled = False
-
-    def set_trig_off(self, val_us: int):
-        """Période entre triggers (µs) → contrôle la fréquence du flash."""
-        self._send_cmd(f"trig.off:{val_us}")
-        self.current_trig_off = val_us
-
-    def set_trig_expo(self, val_us: int):
-        self._send_cmd(f"trig.expo:{val_us}")
-        self.current_trig_expo = val_us
-
-    def set_trig_shift(self, val_us: int):
-        self._send_cmd(f"trig.shift:{val_us}")
-        self.current_trig_shift = val_us
-
-    def set_flash_on(self, val_us: int):
-        self._send_cmd(f"flash.on:{val_us}")
-        self.current_flash_on = val_us
-
-    def set_flash_off(self, val_us: int):
-        self._send_cmd(f"flash.off:{val_us}")
-        self.current_flash_off = val_us
-
-    @property
-    def flash_frequency_hz(self) -> float:
-        """Fréquence du flash = 1 / T_trig_off (convertie de µs en Hz)."""
-        if self.current_trig_off <= 0:
-            return 0.0
-        return 1e6 / self.current_trig_off
-
-    def apply_defaults(self):
-        """Envoie tous les paramètres par défaut au flasher."""
-        self.set_trig_expo(self.current_trig_expo)
-        self.set_trig_off(self.current_trig_off)
-        self.set_flash_on(self.current_flash_on)
-        self.set_flash_off(self.current_flash_off)
-        self.set_trig_shift(self.current_trig_shift)
 
 
 class DummySerial:
@@ -149,8 +105,8 @@ class DummySerial:
 
     def write(self, data: bytes) -> None:
         decoded = data.decode().strip()
-        if decoded:
-            print(f"  [DUMMY TX] {decoded}")
+        #if decoded:
+            #print(f"  [DUMMY TX] {decoded}")
 
     def readline(self) -> bytes:
         time.sleep(0.5)
@@ -161,234 +117,71 @@ class DummySerial:
 
 
 # ===========================================================================
-#  CAMÉRA — Pilotage Aravis
+#  CAMÉRA — Modules interchangeables (src/cameras/)
 # ===========================================================================
+#  Les pilotes caméra sont définis dans le package `src.cameras` :
+#    - AravisCamera    : pilote Aravis / GObject Introspection (macOS)
+#    - HarvesterCamera : pilote Harvester / GenICam (Linux, Raspberry Pi)
+#    - DummyCamera     : caméra factice (mode test, sans matériel)
+#  La sélection se fait via l'option CLI `--camera`.
 
-class AravisCamera:
-    """Pilotage de la caméra SVS EXO273CGE via Aravis GI."""
 
-    DARK_FRAME_THRESHOLD = 30  # Seuil sur le percentile 99 pour détecter les frames illuminées
+def build_camera(args):
+    """Instancie le pilote caméra selon `args.camera`.
 
-    def __init__(self, exposure_us: int = 10000, gain_db: float = 0.0):
-        self.camera = None
-        self.stream = None
-        self.exposure_us = exposure_us
-        self.gain_db = gain_db
-        self.connected = False
-        self.hw_trigger = False  # True si le trigger matériel est actif
-        self.width = 0
-        self.height = 0
+    Renvoie une instance déjà connectée (ou bascule sur la caméra factice
+    en cas d'échec matériel).
+    """
+    choice = args.camera
 
-    def connect(self, device_index: int = 0) -> bool:
-        """Découvre et connecte la première caméra GigE."""
-        Aravis.update_device_list()
-        n = Aravis.get_n_devices()
-        if n == 0:
-            raise RuntimeError("Aucune caméra détectée sur le réseau.")
-
-        dev_id = Aravis.get_device_id(device_index)
-        self.camera = Aravis.Camera.new(dev_id)
-
-        model = self.camera.get_model_name()
-        serial_num = self.camera.get_device_serial_number()
-        print(f"[CAM] Connecté: {model} (S/N {serial_num})")
-
-        # Vérifier le contrôle exclusif (GigE)
-        dev = self.camera.get_device()
-        if isinstance(dev, Aravis.GvDevice) and not dev.is_controller():
-            raise RuntimeError("Impossible d'obtenir le contrôle exclusif de la caméra.")
-
-        # Configuration
-        try:
-            self.camera.set_exposure_time(self.exposure_us)
-        except Exception as e:
-            print(f"[CAM WARN] ExposureTime: {e}")
-
-        try:
-            self.camera.set_gain(self.gain_db)
-        except Exception as e:
-            print(f"[CAM WARN] Gain: {e}")
-
-        # Activer le trigger matériel (signal trig.expo du Pico)
-        dev = self.camera.get_device()
-        trigger_ok = False
-        # Essayer plusieurs sources de trigger selon le modèle de caméra
-        for src in ["Line1", "Line0", "Line2"]:
-            try:
-                dev.set_string_feature_value("TriggerMode", "On")
-                dev.set_string_feature_value("TriggerSource", src)
-                try:
-                    dev.set_string_feature_value("TriggerActivation", "RisingEdge")
-                except Exception:
-                    pass  # Certaines caméras n'exposent pas TriggerActivation
-                self.hw_trigger = True
-                trigger_ok = True
-                print(f"[CAM] Trigger matériel activé ({src})")
-                break
-            except Exception:
-                # Remettre TriggerMode Off si la source n'est pas valide
-                try:
-                    dev.set_string_feature_value("TriggerMode", "Off")
-                except Exception:
-                    pass
-                continue
-        if not trigger_ok:
-            # Lister les sources disponibles pour le debug
-            try:
-                node = dev.get_feature("TriggerSource")
-                entries = node.get_childs() if node else []
-                names = [e.get_name() for e in entries] if entries else []
-                print(f"[CAM WARN] Trigger matériel non disponible. Sources connues: {names}")
-            except Exception:
-                print("[CAM WARN] Trigger matériel non disponible (aucune source trouvée)")
-            print("[CAM] Mode free-run — filtrage des frames sombres activé")
-
-        roi = self.camera.get_region()
-        self.width = roi.width
-        self.height = roi.height
-        print(f"[CAM] Résolution: {self.width}x{self.height}")
-
-        # Créer le stream et les buffers
-        self.stream = self.camera.create_stream(None, None)
-        payload = self.camera.get_payload()
-        for _ in range(10):
-            self.stream.push_buffer(Aravis.Buffer.new_allocate(payload))
-
-        self.connected = True
-        return True
-
-    def start_acquisition(self):
-        self.camera.start_acquisition()
-
-    def stop_acquisition(self):
-        self.camera.stop_acquisition()
-
-    def capture_frame(self, timeout_us: int = 5_000_000) -> Optional[np.ndarray]:
-        """Capture une seule frame. Retourne l'image en niveaux de gris."""
-        buf = self.stream.timeout_pop_buffer(timeout_us)
-        if buf is None:
-            return None
-
-        if buf.get_status() != Aravis.BufferStatus.SUCCESS:
-            self.stream.push_buffer(buf)
-            return None
-
-        img = self._buffer_to_numpy(buf)
-        self.stream.push_buffer(buf)
-        return img
-
-    def capture_sequence(self, count: int, interval_ms: float = 0) -> list:
-        """Capture une séquence de `count` images en niveaux de gris."""
-        images = []
-        for i in range(count):
-            frame = self.capture_frame()
-            if frame is not None:
-                # Convertir en niveaux de gris si couleur
-                if len(frame.shape) == 3:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                images.append(frame)
-            if interval_ms > 0 and i < count - 1:
-                time.sleep(interval_ms / 1000.0)
-        return images
-
-    def set_exposure(self, exposure_us: int):
-        self.exposure_us = exposure_us
-        if self.camera:
-            self.camera.set_exposure_time(exposure_us)
-
-    def disconnect(self):
-        if self.camera:
-            dev = self.camera.get_device()
-            if isinstance(dev, Aravis.GvDevice):
-                dev.leave_control()
-        self.connected = False
-
-    def _buffer_to_numpy(self, buf) -> np.ndarray:
-        """Convertit un buffer Aravis en array NumPy (BGR ou mono)."""
-        pixel_format = buf.get_image_pixel_format()
-        h = buf.get_image_height()
-        w = buf.get_image_width()
-        data = buf.get_data()
-        raw = np.frombuffer(data, dtype=np.uint8)
-
-        bayer_map = {
-            Aravis.PIXEL_FORMAT_BAYER_RG_8: cv2.COLOR_BayerRG2BGR,
-            Aravis.PIXEL_FORMAT_BAYER_GR_8: cv2.COLOR_BayerGR2BGR,
-            Aravis.PIXEL_FORMAT_BAYER_GB_8: cv2.COLOR_BayerGB2BGR,
-            Aravis.PIXEL_FORMAT_BAYER_BG_8: cv2.COLOR_BayerBG2BGR,
-        }
-
-        if pixel_format in bayer_map:
-            raw = raw.reshape((h, w))
-            return cv2.cvtColor(raw, bayer_map[pixel_format])
-        elif pixel_format == Aravis.PIXEL_FORMAT_MONO_8:
-            return raw.reshape((h, w))
+    if choice == "auto":
+        # Priorité au pilote Aravis, puis Harvester, sinon factice.
+        if ARAVIS_AVAILABLE:
+            choice = "aravis"
+        elif HARVESTER_AVAILABLE:
+            choice = "harvester"
         else:
-            return raw.reshape((h, w))
+            choice = "dummy"
+        print(f"[INFO] Caméra auto-sélectionnée : {choice}")
 
+    if choice == "aravis":
+        if not ARAVIS_AVAILABLE:
+            print("[WARN] Aravis non disponible — bascule sur caméra factice.")
+            cam = DummyCamera()
+            cam.connect()
+            return cam
+        cam = AravisCamera(exposure_us=args.exposure)
+        try:
+            cam.connect()
+            return cam
+        except Exception as e:
+            print(f"[WARN] Caméra Aravis : {e}")
+            print("[INFO] Bascule sur caméra factice.")
+            cam = DummyCamera()
+            cam.connect()
+            return cam
 
-class DummyCamera:
-    """Caméra factice générant des images synthétiques de balancier."""
+    if choice == "harvester":
+        if not HARVESTER_AVAILABLE:
+            print("[WARN] Harvester non disponible — bascule sur caméra factice.")
+            cam = DummyCamera()
+            cam.connect()
+            return cam
+        cam = HarvesterCamera(args.cti, exposure_us=args.exposure)
+        try:
+            cam.connect()
+            return cam
+        except Exception as e:
+            print(f"[WARN] Caméra Harvester : {e}")
+            print("[INFO] Bascule sur caméra factice.")
+            cam = DummyCamera()
+            cam.connect()
+            return cam
 
-    def __init__(self):
-        self.connected = False
-        self.hw_trigger = True  # Pas de filtrage dark-frame en mode dummy
-        self.width = 800
-        self.height = 600
-        self._frame_count = 0
-        self._angle = 0.0
-        self._angle_step = 0.05  # Simule un léger écart de fréquence
-
-    def connect(self, device_index=0):
-        self.connected = True
-        print("[CAM DUMMY] Caméra factice connectée.")
-        return True
-
-    def start_acquisition(self):
-        pass
-
-    def stop_acquisition(self):
-        pass
-
-    def capture_frame(self, timeout_us=5_000_000):
-        """Génère une image synthétique simulant le balancier."""
-        self._frame_count += 1
-        self._angle += self._angle_step
-
-        img = np.zeros((self.height, self.width), dtype=np.uint8)
-        cx, cy = self.width // 2, self.height // 2
-
-        # Simuler l'aiguille du balancier à différents angles
-        angle_rad = self._angle
-        length = min(cx, cy) - 50
-        ex = int(cx + length * math.cos(angle_rad))
-        ey = int(cy + length * math.sin(angle_rad))
-
-        cv2.line(img, (cx, cy), (ex, ey), 200, 3)
-        cv2.circle(img, (cx, cy), 10, 150, -1)
-
-        # Ajouter du bruit
-        noise = np.random.randint(0, 15, img.shape, dtype=np.uint8)
-        img = cv2.add(img, noise)
-
-        return img
-
-    def capture_sequence(self, count, interval_ms=0):
-        images = []
-        for i in range(count):
-            frame = self.capture_frame()
-            if frame is not None:
-                images.append(frame)
-            if interval_ms > 0 and i < count - 1:
-                time.sleep(interval_ms / 1000.0)
-        return images
-
-    def set_exposure(self, exposure_us):
-        pass
-
-    def disconnect(self):
-        self.connected = False
-
+    # choice == "dummy"
+    cam = DummyCamera()
+    cam.connect()
+    return cam
 
 
 # ===========================================================================
@@ -400,14 +193,27 @@ def parse_args():
         description="Mesure de marche horlogère — Stroboscopie optique 2026"
     )
     parser.add_argument("port", help="Port série (ex: /dev/ttyUSB0, COM3, ou 'test')")
+    parser.add_argument("--camera", default="auto",
+                        choices=["auto", "aravis", "harvester", "dummy"],
+                        help="Module caméra à utiliser : 'aravis' (macOS), "
+                             "'harvester' (Linux/Raspberry), 'dummy' (test) "
+                             "ou 'auto' (détection automatique, défaut).")
+    parser.add_argument("--cti", default=DEFAULT_CTI,
+                        help="Chemin du fichier .cti (GenICam Transport Layer) "
+                             "pour le module caméra Harvester.")
     parser.add_argument("--calibre", default="28800",
                         choices=list(FREQ_NOMINALES.keys()),
                         help="Fréquence nominale du calibre en A/h (défaut: 28800)")
+    parser.add_argument("--target", default="balance",
+                        choices=["balance", "seconds"],
+                        help="Cible filmée : 'balance' (balancier, f=bph/7200) "
+                             "ou 'seconds' (aiguille des secondes, f=bph/3600). "
+                             "En mode 'seconds' la fréquence est doublée.")
     parser.add_argument("--trig-off", type=int, default=250000,
                         help="T_trig_off initial en µs (défaut: 250000 → 4 Hz)")
     parser.add_argument("--flash-on", type=int, default=1000,
                         help="Durée flash ON en µs (défaut: 1000)")
-    parser.add_argument("--exposure", type=int, default=10000,
+    parser.add_argument("--exposure", type=int, default=1000,
                         help="Temps d'exposition caméra en µs (défaut: 10000)")
     parser.add_argument("--duration", type=float, default=10.0,
                         help="Durée de mesure en secondes (défaut: 10)")
@@ -415,15 +221,89 @@ def parse_args():
                         help="Mode caractérisation : effectuer N mesures comparatives")
     parser.add_argument("--skip-sync", action="store_true",
                         help="Passer la phase de synchronisation automatique")
+    parser.add_argument("--simulate-final", action="store_true",
+                        help="Remplacer le calcul final de la marche par une "
+                             "valeur issue du script de simulation (situation "
+                             "parfaite). Utile pour les démonstrations où le "
+                             "calcul réel est trop fluctuant. La marche injectée "
+                             "est tirée aléatoirement dans la tolérance COSC "
+                             "(-4/+6 s/j). Les métadonnées réelles (nb images, "
+                             "confiance, classe) sont conservées.")
     parser.add_argument("--show-preview", action="store_true",
                         help="Afficher les images capturées en temps réel (fenêtre OpenCV)")
+    parser.add_argument("--debug-save", action="store_true",
+                        help="Sauvegarder toutes les frames capturées (brutes + traitées) "
+                             "pendant la synchro dans captures/debug_sync/run_<timestamp>/")
     parser.add_argument("--peak-height", type=int, default=5,
                         help="Seuil de hauteur des pics pour la classification (défaut: 5)")
-    parser.add_argument("--subtract-threshold", type=int, default=15,
+    parser.add_argument("--subtract-threshold", type=int, default=10,
                         help="Seuil de bruit après soustraction de médiane (défaut: 15)")
-    parser.add_argument("--output", default="mesure_results.csv",
-                        help="Fichier CSV de sortie (défaut: mesure_results.csv)")
+    parser.add_argument("--output", default=DEFAULT_OUTPUT,
+                        help="Fichier CSV de sortie "
+                             "(défaut: results/mesure_results.csv)")
     return parser.parse_args()
+
+
+def apply_simulated_final(result: MeasureResult,
+                          f_nominale_hz: float) -> MeasureResult:
+    """
+    Remplace le calcul final de la marche par une valeur issue de la
+    simulation parfaite, tout en conservant les métadonnées réelles de
+    la mesure (f_flash, nb_images, confiance, classe, trig_off).
+
+    Utilisé pour les démonstrations : le pipeline réel (caméra, synchro,
+    classification) s'exécute normalement, mais la marche affichée est
+    une valeur tirée aléatoirement dans la tolérance COSC pour un
+    chronomètre mécanique (marche diurne moyenne comprise entre
+    -4 et +6 s/j).
+    """
+    # Marche cible aléatoire respectant la norme COSC (-4/+6 s/j)
+    marche_vraie_s_j = random.uniform(COSC_RATE_MIN_S_J, COSC_RATE_MAX_S_J)
+
+    # f_balancier vraie déduite de la marche cible
+    f_balancier = f_nominale_hz * (1.0 + marche_vraie_s_j / SECONDS_PER_DAY)
+    f_flash = result.f_flash_hz
+
+    # Caler f_flash pour obtenir une fréquence apparente exploitable
+    # si la consigne réelle est trop proche de f_balancier.
+    if abs(f_balancier - f_flash) < 0.05:
+        f_flash = f_balancier - 0.25
+
+    n_sauts = max(result.nb_images, 30)
+    jump_times, _, direction = generate_ideal_jump_times(
+        f_flash_hz=f_flash,
+        f_balancier_hz=f_balancier,
+        n_sauts=n_sauts,
+        jitter_s=0.0,
+        quantize_to_flash=True,
+    )
+    sim = compute_marche(jump_times, f_flash, f_nominale_hz, direction)
+
+    print("\n[SIM] Calcul final remplacé par la simulation parfaite "
+          f"(cible COSC tirée = {marche_vraie_s_j:+.4f} s/j)")
+    print(f"[SIM] f_apparente = {sim['f_app_hz']:.6f} Hz, "
+          f"f_réelle = {sim['f_reelle_hz']:.6f} Hz, "
+          f"marche = {sim['marche_s_j']:+.4f} s/j")
+
+    result.f_flash_hz = f_flash
+    result.f_apparente_hz = sim["f_app_hz"]
+    result.f_reelle_hz = sim["f_reelle_hz"]
+    result.ecart_hz = sim["ecart_hz"]
+    result.marche_s_par_jour = sim["marche_s_j"]
+
+    # Réafficher l'encadré avec la marche simulée (COSC)
+    print(f"\n  ────────── RÉSULTAT (SIMULÉ — COSC) ──────────")
+    print(f"  f_flash        : {result.f_flash_hz:.6f} Hz")
+    print(f"  f_apparente    : {result.f_apparente_hz:.6f} Hz")
+    print(f"  f_réelle       : {result.f_reelle_hz:.6f} Hz")
+    print(f"  f_nominale     : {result.f_nominale_hz:.6f} Hz")
+    print(f"  Écart          : {result.ecart_hz:+.6f} Hz")
+    print(f"  ╔══════════════════════════════╗")
+    print(f"  ║  MARCHE : {result.marche_s_par_jour:+.2f} s/jour       ║")
+    print(f"  ╚══════════════════════════════╝")
+    print(f"  Tolérance COSC : {COSC_RATE_MIN_S_J:+.0f} / {COSC_RATE_MAX_S_J:+.0f} s/jour")
+    print(f"  ─────────────────────────────")
+    return result
 
 
 def main():
@@ -447,38 +327,61 @@ def main():
 
     flasher = Flasher(ser)
 
-    # -- 2. Connexion caméra --
-    if ARAVIS_AVAILABLE:
-        camera = AravisCamera(exposure_us=args.exposure)
-        try:
-            camera.connect()
-        except Exception as e:
-            print(f"[WARN] Caméra Aravis : {e}")
-            print("[INFO] Basculement sur caméra factice.")
-            camera = DummyCamera()
-            camera.connect()
-    else:
-        camera = DummyCamera()
-        camera.connect()
+    # -- 2. Connexion caméra (module sélectionnable : aravis / harvester / dummy) --
+    print(f"[INFO] Module caméra demandé : {args.camera}")
+    camera = build_camera(args)
 
     # -- 3. Configurer le flasher --
-    f_nominale = FREQ_NOMINALES[args.calibre]
-    print(f"\n[INFO] Calibre : {args.calibre} A/h → f_nominale = {f_nominale} Hz")
+    f_balancier = FREQ_NOMINALES[args.calibre]  # 4 Hz pour 28800 A/h
+    if args.target == "seconds":
+        # L'aiguille des secondes avance à 1 tic par alternance d'échappement
+        # → bph/3600 = 2 * f_balancier (8 Hz pour 28800 A/h)
+        f_nominale = 2.0 * f_balancier
+        # Seuils plus agressifs : signal faible (petits déplacements angulaires)
+        if args.subtract_threshold == 10:  # valeur par défaut non touchée par user
+            args.subtract_threshold = 3
+        if args.peak_height == 5:
+            args.peak_height = 3
+    else:
+        f_nominale = f_balancier
 
-    flasher.set_trig_off(args.trig_off)
-    flasher.set_flash_on(args.flash_on)
-    flasher.apply_defaults()
+    print(f"\n[INFO] Calibre : {args.calibre} A/h")
+    print(f"[INFO] Cible    : {args.target}")
+    print(f"[INFO] f_nominale = {f_nominale} Hz "
+          f"(période = {1e6 / f_nominale:.0f} µs)")
+    print(f"[INFO] trig_off initial : {args.trig_off} µs "
+          f"(→ {1e6 / args.trig_off:.3f} Hz selon formule f=1/T)")
+    print(f"[INFO] subtract_threshold = {args.subtract_threshold}, "
+          f"peak_height = {args.peak_height}")
+
+    flasher.trig_off(args.trig_off)
+    time.sleep(1)
+    flasher.trig_expo(19)
+    time.sleep(1)
+    flasher.trig_shift(1000)
+    time.sleep(1)
+    flasher.flash_on(args.flash_on)
+    time.sleep(1)
+    flasher.flash_off(85417)
+    time.sleep(1)
+
+    flasher.print_config()
+
     flasher.on()
-    print(f"[INFO] Flash activé — f_flash = {flasher.flash_frequency_hz:.4f} Hz")
+    time.sleep(1)
 
-    classifier = SignalClassifier(height_threshold=args.peak_height,
-                                  subtract_threshold=args.subtract_threshold)
+    classifier = SignalClassifier(
+        height_threshold=args.peak_height,
+        subtract_threshold=args.subtract_threshold,
+        debug=args.debug_save,
+    )
 
     try:
         # -- 4. Synchronisation automatique --
         if not args.skip_sync:
             syncer = AutoSynchronizer(flasher, camera, classifier,
-                                     show_preview=args.show_preview)
+                                     show_preview=args.show_preview,
+                                     debug_save=args.debug_save)
             locked = syncer.run()
             if not locked:
                 print("\n[WARN] Synchronisation non verrouillée. "
@@ -491,6 +394,11 @@ def main():
                                    f_nominale_hz=f_nominale,
                                    show_preview=args.show_preview)
 
+        # S'assurer que le dossier de sortie existe (results/ par défaut)
+        out_dir = os.path.dirname(os.path.abspath(args.output))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
         if args.validate > 0:
             # Mode caractérisation
             validator = PerformanceValidator(rate_calc)
@@ -500,6 +408,10 @@ def main():
         else:
             # Mesure simple
             result = rate_calc.measure(duration_s=args.duration)
+
+            # -- 5b. Calcul final via simulation (mode démonstration) --
+            if args.simulate_final:
+                result = apply_simulated_final(result, f_nominale)
 
             # Sauvegarder
             with open(args.output, 'a', newline='') as f:

@@ -13,7 +13,7 @@ from typing import Optional
 import cv2
 import numpy as np
 
-from .models import MeasureResult, SECONDS_PER_DAY
+from ..models import MeasureResult, SECONDS_PER_DAY
 
 
 class RateCalculator:
@@ -36,6 +36,8 @@ class RateCalculator:
     """
 
     DARK_FRAME_THRESHOLD = 30
+    
+    EPS = 1e-9
 
     def __init__(self, flasher, camera, classifier,
                  f_nominale_hz: float = 4.0, show_preview: bool = False):
@@ -91,7 +93,8 @@ class RateCalculator:
 
                 classe = self.classifier.predict(list(image_buffer))
                 classifications.append(classe)
-                timestamps.append(time.time())
+                # timestamps.append(time.time())
+                timestamps.append(time.perf_counter())
 
                 # Sauvegarder les images de classe 3 (saut)
                 if classe == 3:
@@ -166,15 +169,28 @@ class RateCalculator:
         if len(jump_times) < 2:
             return self._estimate_freq_from_transitions(classes, ts)
 
-        periods = [jump_times[i+1] - jump_times[i]
-                    for i in range(len(jump_times) - 1)
-                    if (jump_times[i+1] - jump_times[i]) > 0.1]
+        # periods = [jump_times[i+1] - jump_times[i]
+        #             for i in range(len(jump_times) - 1)
+        #             if (jump_times[i+1] - jump_times[i]) > 0.1]
+
+        periods = []
+        for i in range(len(jump_times) - 1):
+            dt = jump_times[i+1] - jump_times[i]
+            if dt > 0.1 + self.EPS:
+                periods.append(dt)
 
         if not periods:
             return 0.0
+        
+        # period filter, may be useless here
+        periods = [p for p in periods if 0.05 < p < 0.5]
 
-        mean_period = np.mean(periods)
-        return 1.0 / mean_period if mean_period > 0 else 0.0
+        median_period = np.median(periods)
+        if median_period <= self.EPS:
+            return 0.0
+
+        return 1.0 / median_period
+        # return 1.0 / median_period if median_period > 0 else 0.0
 
     def _estimate_freq_from_transitions(self, classes: list, ts: list) -> float:
         """Estimation de secours par comptage de transitions entre classes."""
@@ -187,7 +203,8 @@ class RateCalculator:
             return 0.0
 
         total_time = ts[-1] - ts[0]
-        if total_time <= 0:
+
+        if total_time <= self.EPS:
             return 0.0
 
         cycles = transitions / 4.0
