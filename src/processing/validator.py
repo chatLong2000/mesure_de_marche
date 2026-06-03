@@ -7,7 +7,7 @@ from datetime import datetime
 
 import numpy as np
 
-from .models import MeasureResult, WitschiComparison
+from ..models import MeasureResult, WitschiComparison
 from .rate_calculator import RateCalculator
 
 

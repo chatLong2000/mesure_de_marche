@@ -3,8 +3,21 @@ import cv2
 from scipy.signal import find_peaks
 
 class SignalClassifier():
-    def __init__(self, height_threshold=10):
+    def __init__(self, height_threshold=10, subtract_threshold=30, debug=False):
         self.height_threshold = height_threshold
+        self.subtract_threshold = subtract_threshold
+        self.debug = debug
+        self.last_processed = None
+        self.last_raw_diff = None  # Diff avant seuillage (pour debug)
+        # État détaillé du dernier predict() (pour debug visuel)
+        self.last_profile = None
+        self.last_peaks = None
+        self.last_peak_heights = None
+        self.last_center = None
+        self.last_tip = None
+        self.last_base = None
+        self.last_d_perp = None
+        self.last_invalid_reason = None
 
     def crop_to_square(self, img):
         """ 
@@ -42,20 +55,28 @@ class SignalClassifier():
         """
         assert len(images) == 4, "Il faut exactement 4 images"
         
-        # Mediane des 3 premières images
-        median_image = np.median(np.stack(images[:3]), axis=0)
+        # Mediane des 3 premières images (en float pour permettre la diff signée)
+        median_image = np.median(np.stack(images[:3]).astype(np.float32), axis=0)
 
-        # Soustraction de la médiane de la 4ème image
-        result = images[3] - median_image
-        
-        # Clippage (0-255) et conversion en uint8
-        result = np.clip(result, 0, 255).astype(np.uint8)
+        # Soustraction de la médiane de la 4ème image (différence signée)
+        diff = images[3].astype(np.float32) - median_image
+
+        # On garde uniquement les valeurs positives (le balancier "apparaît" sur la frame courante)
+        result = np.clip(diff, 0, 255).astype(np.uint8)
 
         # Recadrage pour obtenir une image carrée
         result = self.crop_to_square(result)
-        
+        self.last_raw_diff = result.copy()  # Avant seuillage (pour debug)
+
+        if self.debug:
+            print(f"  [CLASSIFIER] diff stats: "
+                  f"min={diff.min():.1f} max={diff.max():.1f} "
+                  f"mean={diff.mean():.2f} "
+                  f"p95={np.percentile(result, 95):.1f} p99={np.percentile(result, 99):.1f} "
+                  f"nb_pix>thresh({self.subtract_threshold})={int((result >= self.subtract_threshold).sum())}")
+
         # Seuillage pour éliminer les pixels faibles
-        result[result < 30] = 0
+        result[result < self.subtract_threshold] = 0
         return result
     
     def extract_perpendicular_vector(self, img, alpha=0.99, nb_pixels=15):
@@ -77,22 +98,40 @@ class SignalClassifier():
         _, img_thresh = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY)
         # Trouver les pixels non nuls
         ys, xs = np.where(img_thresh > 0)
-        coords = np.column_stack((xs, ys))
-        
+
         h, w = img.shape
-        # Centrée de l'image
-        center = np.array([w // 2, h // 2])
+        self.last_center = np.array([w // 2, h // 2])
+        self.last_tip = None
+        self.last_base = None
+        self.last_d_perp = None
+
+        if len(xs) == 0:
+            self.last_invalid_reason = "aucun pixel > 0 dans l'image traitée"
+            return np.array([]), False
+
+        coords = np.column_stack((xs, ys))
+
+        center = self.last_center
         # Calculer la distance entre chaque pixel et le centre
         dists = np.linalg.norm(coords - center, axis=1)
         # Trouver le pixel le plus éloigné du centre
         tip = coords[np.argmax(dists)]
+        self.last_tip = tip
 
         vec = tip - center
+        norm = np.linalg.norm(vec)
+
+        if norm == 0:
+            self.last_invalid_reason = "tip coïncide avec le centre (norm=0)"
+            return np.array([]), False
+
         new_base = center + alpha * vec
+        self.last_base = new_base
 
         # Calculer le vecteur unitaire perpendiculaire au vecteur (centre -> tip)
         d_perp = np.array([-vec[1], vec[0]], dtype=float)
-        d_perp = d_perp / np.linalg.norm(d_perp)
+        d_perp = d_perp / norm
+        self.last_d_perp = d_perp
 
         line_points = []
 
@@ -107,12 +146,21 @@ class SignalClassifier():
             if 0 <= x < img.shape[1] and 0 <= y < img.shape[0]:
                 line_points.append(img[y, x])
             else:
+                # On garde le profil partiel pour debug
+                self.last_profile = np.array(line_points)
+                self.last_invalid_reason = (
+                    f"ligne perpendiculaire sort de l'image au pas i={i} "
+                    f"(x={x}, y={y}, taille={w}x{h})"
+                )
                 return np.array([]), False
-        
+
         # Vérifier si tous les points sont nuls
         if np.all(np.array(line_points) == 0):
+            self.last_profile = np.array(line_points)
+            self.last_invalid_reason = "tous les pixels de la ligne sont nuls"
             return np.array([]), False
 
+        self.last_invalid_reason = None
         return np.array(line_points), True
 
     def classify_signal(self, sequence):
@@ -137,7 +185,11 @@ class SignalClassifier():
         peaks, properties = find_peaks(sequence, height=self.height_threshold, distance=3)
         # Récupérer les hauteurs des pics
         heights = properties.get("peak_heights", [])
-        
+
+        # Mémoriser pour debug
+        self.last_peaks = peaks
+        self.last_peak_heights = heights
+
         # Si 1 pic est détecté
         if len(peaks) == 1:
             return 0
@@ -167,7 +219,16 @@ class SignalClassifier():
         # print(images[3])
 
         processed = self.subtract_median(images)
+        self.last_processed = processed
+        # Réinitialiser l'état de debug pour ce predict
+        self.last_profile = None
+        self.last_peaks = None
+        self.last_peak_heights = None
+        self.last_invalid_reason = None
+
         profile, valid = self.extract_perpendicular_vector(processed)
+        if valid:
+            self.last_profile = profile
 
         if not valid:
             return -1

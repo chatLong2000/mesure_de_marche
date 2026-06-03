@@ -50,7 +50,9 @@ class AutoSynchronizer:
     DARK_FRAME_THRESHOLD = 30     # Seuil p99 pour détecter les frames illuminées
 
     def __init__(self, flasher, camera, classifier,
-                 show_preview: bool = False):
+                 show_preview: bool = False,
+                 debug_save: bool = False,
+                 debug_dir: str = "captures/debug_sync"):
         self.flasher = flasher
         self.camera = camera
         self.classifier = classifier
@@ -61,6 +63,17 @@ class AutoSynchronizer:
         self.sweep_direction = 1      # +1 ou -1
         self.sweep_origin = 0         # trig_off de départ du balayage
         self.saut_count = 0           # Nb total de sauts détectés
+
+        # --- Debug : sauvegarde des images capturées ---
+        self.debug_save = debug_save
+        self.debug_run_dir = None
+        if self.debug_save:
+            run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.debug_run_dir = os.path.join(debug_dir, f"run_{run_ts}")
+            os.makedirs(os.path.join(self.debug_run_dir, "raw"), exist_ok=True)
+            os.makedirs(os.path.join(self.debug_run_dir, "processed"), exist_ok=True)
+            os.makedirs(os.path.join(self.debug_run_dir, "raw_diff"), exist_ok=True)
+            print(f"[DEBUG] Sauvegarde des frames de synchro → {self.debug_run_dir}")
 
     def run(self) -> bool:
         """
@@ -98,13 +111,19 @@ class AutoSynchronizer:
                 if frame is None:
                     continue
 
-                out_dir = "captures/tmp"
-                os.makedirs(out_dir, exist_ok=True)
-                ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-                fname = os.path.join(out_dir, f"{ts}.png")
-                cv2.imwrite(fname, frame)
-                # print(f"    [SAVE] {fname}")
-                
+                # -- Debug : sauvegarde brute de chaque frame capturée --
+                raw_path = None
+                if self.debug_save:
+                    ts = datetime.now().strftime("%H%M%S_%f")[:-3]
+                    raw_path = os.path.join(
+                        self.debug_run_dir, "raw",
+                        f"f{iteration:05d}_{ts}_trig{self.flasher._trig_off}.png"
+                    )
+                    try:
+                        cv2.imwrite(raw_path, frame)
+                    except Exception as e:
+                        print(f"    [DEBUG WARN] imwrite raw: {e}")
+
                 # Buffer glissant : garder les 4 dernières images (raw, sans CLAHE)
                 image_buffer.append(frame)
                 iteration += 1
@@ -122,6 +141,34 @@ class AutoSynchronizer:
                 # -- Classifier --
                 classe = self.classifier.predict(list(image_buffer))
                 self.history.append(classe)
+
+                # -- Debug : renommer la frame brute avec la classe + sauver le processed --
+                if self.debug_save:
+                    try:
+                        if raw_path is not None and os.path.exists(raw_path):
+                            new_raw = raw_path.replace(".png", f"_c{classe}.png")
+                            os.rename(raw_path, new_raw)
+                        if self.classifier.last_processed is not None:
+                            ts_p = datetime.now().strftime("%H%M%S_%f")[:-3]
+                            proc_path = os.path.join(
+                                self.debug_run_dir, "processed",
+                                f"f{iteration:05d}_{ts_p}_c{classe}.png"
+                            )
+                            cv2.imwrite(proc_path, self.classifier.last_processed)
+                        if getattr(self.classifier, "last_raw_diff", None) is not None:
+                            diff_path = os.path.join(
+                                self.debug_run_dir, "raw_diff",
+                                f"f{iteration:05d}_c{classe}.png"
+                            )
+                            # Étirement de contraste pour visualiser
+                            d = self.classifier.last_raw_diff
+                            if d.max() > 0:
+                                d_vis = (d.astype(np.float32) * (255.0 / d.max())).astype(np.uint8)
+                            else:
+                                d_vis = d
+                            cv2.imwrite(diff_path, d_vis)
+                    except Exception as e:
+                        print(f"    [DEBUG WARN] save processed: {e}")
 
                 # Détection de saut (classe 3 ou transition 1↔2)
                 if classe == 3:

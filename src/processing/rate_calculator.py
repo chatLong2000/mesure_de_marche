@@ -13,7 +13,7 @@ from typing import Optional
 import cv2
 import numpy as np
 
-from .models import MeasureResult, SECONDS_PER_DAY
+from ..models import MeasureResult, SECONDS_PER_DAY
 
 
 class RateCalculator:
@@ -185,12 +185,12 @@ class RateCalculator:
         # period filter, may be useless here
         periods = [p for p in periods if 0.05 < p < 0.5]
 
-        mean_period = np.median(periods)
-        if mean_period <= self.EPS:
+        median_period = np.median(periods)
+        if median_period <= self.EPS:
             return 0.0
 
-        return 1.0 / mean_period
-        # return 1.0 / mean_period if mean_period > 0 else 0.0
+        return 1.0 / median_period
+        # return 1.0 / median_period if median_period > 0 else 0.0
 
     def _estimate_freq_from_transitions(self, classes: list, ts: list) -> float:
         """Estimation de secours par comptage de transitions entre classes."""

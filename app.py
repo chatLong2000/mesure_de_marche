@@ -17,7 +17,7 @@ app = Flask(__name__)
 
 # Chemins
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CSV_FILE = os.path.join(BASE_DIR, "mesure_results.csv")
+CSV_FILE = os.path.join(BASE_DIR, "results", "mesure_results.csv")
 SCRIPT_PATH = os.path.join(BASE_DIR, "mesure_marche.py")
 
 # Fréquences nominales
@@ -90,6 +90,7 @@ def api_start_measure():
     duration = data.get("duration", 10)
     trig_off = data.get("trig_off", 250000)
     skip_sync = data.get("skip_sync", False)
+    simulate_final = data.get("simulate_final", False)
 
     # Validation
     if calibre not in FREQ_NOMINALES:
@@ -108,7 +109,7 @@ def api_start_measure():
     conda_env = data.get("conda_env", "ContrHorlo")
     cmd = [
         "conda", "run", "--no-capture-output", "-n", conda_env,
-        "python", SCRIPT_PATH,
+        "python", "-u", SCRIPT_PATH,
         port,
         "--calibre", calibre,
         "--duration", str(duration),
@@ -116,19 +117,25 @@ def api_start_measure():
     ]
     if skip_sync:
         cmd.append("--skip-sync")
+    if simulate_final:
+        cmd.append("--simulate-final")
 
     def run_measurement():
         with state_lock:
             measurement_state["running"] = True
-            measurement_state["log"] = []
+            measurement_state["log"] = ["[INFO] Mesure lancée : " + " ".join(cmd)]
 
         try:
+            env = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                bufsize=1,
                 cwd=BASE_DIR,
+                env=env,
             )
             with state_lock:
                 measurement_state["process"] = proc
