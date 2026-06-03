@@ -125,7 +125,6 @@ python mesure_marche.py test
 | `--duration` | `10` | Durée de mesure en secondes |
 | `--validate N` | `0` | Mode caractérisation : N mesures comparatives |
 | `--skip-sync` | - | Passer la phase de synchronisation automatique |
-| `--simulate-final` | - | Remplacer le calcul final par une valeur simulée (démos) |
 | `--show-preview` | - | Afficher les frames en temps réel (OpenCV) |
 | `--debug-save` | - | Sauvegarder les frames de synchro dans `captures/debug_sync/` |
 | `--output` | `results/mesure_results.csv` | Fichier CSV de sortie |
