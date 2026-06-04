@@ -38,14 +38,14 @@ class AutoSynchronizer:
     """
 
     # Paramètres de l'algorithme
-    COARSE_STEP_US = 100          # Pas large pour la recherche (µs)
-    FINE_STEP_US = 10             # Pas fin pour le verrouillage (µs)
+    COARSE_STEP_US = 1000          # Pas large pour la recherche (µs)
+    FINE_STEP_US = 100             # Pas fin pour le verrouillage (µs)
     WINDOW_SIZE = 20              # Nb d'images dans la fenêtre d'analyse
     TARGET_JUMP_POSITION = 0.5    # Position cible du saut dans le cycle (0.5 = milieu)
     TOLERANCE = 0.15              # Tolérance sur la position (±15%)
-    MAX_ITERATIONS = 1000         # Itérations max avant abandon
+    MAX_ITERATIONS = 75         # Itérations max avant abandon
     CONVERGENCE_COUNT = 20         # Nb de mesures stables pour déclarer la convergence
-    MAX_SWEEP_US = 5000           # Distance max de balayage avant inversion (µs)
+    MAX_SWEEP_US = 50000           # Distance max de balayage avant inversion (µs)
     MIN_SAUT_COUNT = 2            # Nb minimum de sauts pour autoriser le verrouillage
     DARK_FRAME_THRESHOLD = 30     # Seuil p99 pour détecter les frames illuminées
 
