@@ -38,8 +38,6 @@ app.py                  Application web Flask (pilotage + visualisation)
 templates/index.html    Interface web
 results/                Résultats de mesure (CSV)
 captures/               Frames sauvegardées (debug, synchro)
-docs/                   Cahier des charges et rapport
-presentation/           Génération des supports de présentation
 
 src/
 ├── models.py           Data classes et constantes horlogères
